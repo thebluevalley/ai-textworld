@@ -1,6 +1,6 @@
 // utils/ai-dispatcher.ts
 
-// 简单的内存缓存，用于记录 Key 的使用时间
+// 简单的内存缓存
 const keyUsageHistory: Record<string, number> = {};
 
 interface AIRequestOptions {
@@ -11,60 +11,64 @@ interface AIRequestOptions {
 
 export class AIDispatcher {
   private static getKeys(mode: 'reflex' | 'tactic'): string[] {
-    // 🚨 全面切换到 SiliconFlow，因为 Groq 已被限制
-    // 请确保 Vercel 环境变量 SILICON_KEYS 填入了你的 6 个 Key (逗号分隔)
     const keys = process.env.SILICON_KEYS?.split(',');
-    
     if (!keys || keys.length === 0) {
-      console.error(`[AI Error] No keys found in SILICON_KEYS. Check Vercel env vars.`);
+      console.error(`[AI Error] No keys found in SILICON_KEYS.`);
+      return [];
     }
-    return keys || [];
+    return keys;
   }
 
-  // 核心：找到一个当前空闲的 Key
-  // 逻辑：单个 Key 冷却 6.1秒，但多个 Key 轮流工作
-  private static getAvailableKey(keys: string[], mode: 'reflex' | 'tactic'): string | null {
+  // 核心修复：增加 fallback 逻辑
+  private static getAvailableKey(keys: string[]): string {
     const now = Date.now();
-    // 随机打乱以实现负载均衡
+    const cooldown = 6100; // 6.1秒安全间隔
+    
+    // 1. 优先寻找完全冷却的 Key
+    // 打乱顺序以负载均衡
     const shuffled = keys.sort(() => 0.5 - Math.random());
     
     for (const key of shuffled) {
       const cleanKey = key.trim();
       if (!cleanKey) continue;
-
+      
       const lastUsed = keyUsageHistory[cleanKey] || 0;
-      
-      // 单个 Key 限制 10次/分 = 6秒/次。
-      // 我们设为 6100ms 安全缓冲。
-      const cooldown = 6100; 
-      
       if (now - lastUsed > cooldown) {
         keyUsageHistory[cleanKey] = now;
-        return cleanKey;
+        return cleanKey; // 完美，找到一个空闲的
       }
     }
+
+    // 2. 🚨 紧急回退：如果所有 Key 都在冷却，找出那个“休息最久”的 Key 强制使用
+    // 这样游戏永远不会卡住，虽然可能会触发 429 报错，但比前端没反应要好
+    console.warn(`[AI Dispatcher] Warning: All keys busy. Forcing oldest key.`);
     
-    // 如果所有 Key 都在冷却，返回 null (本次跳过，保护账号不被封)
-    return null;
+    let oldestKey = keys[0];
+    let oldestTime = now;
+
+    for (const key of keys) {
+      const cleanKey = key.trim();
+      const lastUsed = keyUsageHistory[cleanKey] || 0;
+      if (lastUsed < oldestTime) {
+        oldestTime = lastUsed;
+        oldestKey = cleanKey;
+      }
+    }
+
+    // 强制更新这个 Key 的时间
+    keyUsageHistory[oldestKey] = now;
+    return oldestKey;
   }
 
   static async chatCompletion({ systemPrompt, userPrompt, mode }: AIRequestOptions) {
     const keys = this.getKeys(mode);
-    const apiKey = this.getAvailableKey(keys, mode);
+    if (keys.length === 0) return null;
 
-    if (!apiKey) {
-      console.warn(`[AI Dispatcher] All keys are cooling down (rate limit protection).`);
-      return null; 
-    }
+    // 获取 Key (现在保证一定会返回一个 Key，不会返回 null)
+    const apiKey = this.getAvailableKey(keys);
 
     const endpoint = 'https://api.siliconflow.cn/v1/chat/completions';
-
-    // 两个模式都使用 SiliconFlow 的模型
-    // reflex (快): Qwen2.5-7B -> 响应极快，适合每2秒一次的微操
-    // tactic (稳): DeepSeek-V3 -> 适合更复杂的逻辑 (目前统一用快模型以保证流畅)
-    const model = mode === 'reflex' 
-      ? 'Qwen/Qwen2.5-7B-Instruct' 
-      : 'deepseek-ai/DeepSeek-V3';
+    const model = 'Qwen/Qwen2.5-7B-Instruct'; // 统一使用快模型
 
     try {
       const response = await fetch(endpoint, {
@@ -85,15 +89,15 @@ export class AIDispatcher {
       });
 
       if (!response.ok) {
+        // 如果这里报错 429，说明连强制模式也救不了（真的超限了）
         const errorText = await response.text();
         console.error(`API Fail: ${response.status} - ${errorText}`);
-        throw new Error(`API Error: ${response.status}`);
+        return null; 
       }
       
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // 清洗 Markdown 代码块
       if (content.includes('```json')) {
         content = content.replace(/```json/g, '').replace(/```/g, '');
       } else if (content.includes('```')) {
