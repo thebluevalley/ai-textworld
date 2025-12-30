@@ -4,43 +4,44 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 export async function POST(req: Request) {
   const { units, obstacles } = await req.json();
 
-  const systemPrompt = `You are a Tactical AI Engine.
-  Map: 20x20 Grid.
+  const systemPrompt = `You are a CQB Tactical AI.
+  Map: 20x20 Grid. Complex Obstacles present.
   
-  IMPORTANT: Output RAW JSON only. NO Markdown. NO Explanations.
+  PHYSICS RULES:
+  1. NO WALL-HACKS: You cannot shoot through walls.
+  2. LINE OF SIGHT (LoS): You can only attack enemies listed in 'visibleEnemies'.
+  3. COLLISION: Do not walk into walls. Use waypoints to go AROUND obstacles.
   
-  SYNTAX WARNING:
-  - Coordinate format must be STRICTLY: { "x": 10, "y": 20 }
-  - DO NOT miss the "y" key! (e.g. { "x": 10, 20 } is WRONG)
+  TACTICS:
+  - If no enemies visible: MOVE to corners or gaps to gain LoS (Search).
+  - If enemy visible but far: MOVE closer to ensure hit.
+  - If low HP: HIDE behind cover (break LoS).
   
-  Game Rules:
-  - High HP System (~500 HP). Low Damage (20-40).
-  - Use Obstacles for cover.
-  - Roles: LEADER, SNIPER, MEDIC.
-  
-  Instructions:
-  1. Move wounded units to cover.
-  2. Medic HEALS nearby allies (range 3).
-  3. Attack enemies in range.
+  DATA FORMAT:
+  - "visibleEnemies": List of targets currently seen by the unit.
   
   Output Example:
   {
     "actions": [
-      { "unitId": "b1", "type": "MOVE", "target": { "x": 5, "y": 6 }, "thought": "Cover" },
-      { "unitId": "r1", "type": "ATTACK", "targetUnitId": "b1", "damage": 30, "thought": "Fire" }
+      { "unitId": "b1", "type": "MOVE", "target": { "x": 10, "y": 5 }, "thought": "Rounding corner" },
+      { "unitId": "b2", "type": "ATTACK", "targetUnitId": "r1", "damage": 25, "thought": "Visual confirmed" }
     ]
   }
   `;
 
+  // 精简数据，重点是 visibleEnemies
+  const promptData = units.map((u: any) => ({
+    id: u.id,
+    team: u.team,
+    pos: u.pos, // 前端已经把 x,y 包装好了
+    hp: u.hp,
+    role: u.role,
+    visibleEnemies: u.visibleEnemies || [] // 关键数据
+  }));
+
   const userPrompt = JSON.stringify({
-    livingUnits: units.map((u: any) => ({ 
-      id: u.id, 
-      team: u.team, 
-      role: u.role, 
-      pos: { x: Math.round(u.x), y: Math.round(u.y) }, // 明确传对象结构
-      hp: u.hp 
-    })),
-    obstacles: obstacles
+    squad_status: promptData,
+    map_obstacles: obstacles // 还是传给 AI，让它大致知道哪有墙
   });
 
   const result = await AIDispatcher.chatCompletion({
