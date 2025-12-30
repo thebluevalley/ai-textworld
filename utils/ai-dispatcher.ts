@@ -11,7 +11,8 @@ interface AIRequestOptions {
 
 export class AIDispatcher {
   private static getKeys(mode: 'reflex' | 'tactic'): string[] {
-    // 🚨 紧急修复：Groq 已被限制，所有模式全部使用 SiliconFlow
+    // 🚨 全面切换到 SiliconFlow，因为 Groq 已被限制
+    // 请确保 Vercel 环境变量 SILICON_KEYS 填入了你的 6 个 Key (逗号分隔)
     const keys = process.env.SILICON_KEYS?.split(',');
     
     if (!keys || keys.length === 0) {
@@ -21,8 +22,10 @@ export class AIDispatcher {
   }
 
   // 核心：找到一个当前空闲的 Key
+  // 逻辑：单个 Key 冷却 6.1秒，但多个 Key 轮流工作
   private static getAvailableKey(keys: string[], mode: 'reflex' | 'tactic'): string | null {
     const now = Date.now();
+    // 随机打乱以实现负载均衡
     const shuffled = keys.sort(() => 0.5 - Math.random());
     
     for (const key of shuffled) {
@@ -30,16 +33,19 @@ export class AIDispatcher {
       if (!cleanKey) continue;
 
       const lastUsed = keyUsageHistory[cleanKey] || 0;
-      // 即使是 SiliconFlow，也保持 3 秒冷却以防万一
-      const cooldown = 3000; 
+      
+      // 单个 Key 限制 10次/分 = 6秒/次。
+      // 我们设为 6100ms 安全缓冲。
+      const cooldown = 6100; 
       
       if (now - lastUsed > cooldown) {
         keyUsageHistory[cleanKey] = now;
         return cleanKey;
       }
     }
-    // 强制取第一个
-    return keys[0]?.trim() || null;
+    
+    // 如果所有 Key 都在冷却，返回 null (本次跳过，保护账号不被封)
+    return null;
   }
 
   static async chatCompletion({ systemPrompt, userPrompt, mode }: AIRequestOptions) {
@@ -47,16 +53,15 @@ export class AIDispatcher {
     const apiKey = this.getAvailableKey(keys, mode);
 
     if (!apiKey) {
-      console.warn(`[AI Dispatcher] All keys busy/missing.`);
+      console.warn(`[AI Dispatcher] All keys are cooling down (rate limit protection).`);
       return null; 
     }
 
-    // 统一使用 SiliconFlow 的接入点
     const endpoint = 'https://api.siliconflow.cn/v1/chat/completions';
 
-    // 策略调整：
-    // reflex (快) -> 使用 Qwen2.5-7B (速度极快，适合高频移动)
-    // tactic (稳) -> 使用 DeepSeek-V3 (逻辑强，适合复杂决策)
+    // 两个模式都使用 SiliconFlow 的模型
+    // reflex (快): Qwen2.5-7B -> 响应极快，适合每2秒一次的微操
+    // tactic (稳): DeepSeek-V3 -> 适合更复杂的逻辑 (目前统一用快模型以保证流畅)
     const model = mode === 'reflex' 
       ? 'Qwen/Qwen2.5-7B-Instruct' 
       : 'deepseek-ai/DeepSeek-V3';
@@ -74,14 +79,13 @@ export class AIDispatcher {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
           ],
-          temperature: 0.6,
-          max_tokens: 512, // 限制回复长度，进一步提速
+          temperature: 0.7,
+          max_tokens: 512,
         })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        // 打印详细错误方便调试
         console.error(`API Fail: ${response.status} - ${errorText}`);
         throw new Error(`API Error: ${response.status}`);
       }
@@ -89,7 +93,7 @@ export class AIDispatcher {
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // 清洗 Markdown
+      // 清洗 Markdown 代码块
       if (content.includes('```json')) {
         content = content.replace(/```json/g, '').replace(/```/g, '');
       } else if (content.includes('```')) {
