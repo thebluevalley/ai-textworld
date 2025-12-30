@@ -1,6 +1,5 @@
 // utils/ai-dispatcher.ts
 
-// 简单的内存缓存
 const keyUsageHistory: Record<string, number> = {};
 
 interface AIRequestOptions {
@@ -11,7 +10,6 @@ interface AIRequestOptions {
 
 export class AIDispatcher {
   private static getKeys(mode: 'reflex' | 'tactic'): string[] {
-    // 确保 Vercel 环境变量 SILICON_KEYS 填入了你的 Key (逗号分隔)
     const keys = process.env.SILICON_KEYS?.split(',');
     if (!keys || keys.length === 0) {
       console.error(`[AI Error] No keys found in SILICON_KEYS.`);
@@ -20,12 +18,12 @@ export class AIDispatcher {
     return keys;
   }
 
-  // 核心：找到一个可用 Key，包含强制回退逻辑
   private static getAvailableKey(keys: string[]): string {
     const now = Date.now();
-    const cooldown = 6100; // 6.1秒安全间隔
+    // ⚡ 极速模式：实名账号冷却仅需 1000ms
+    const cooldown = 1000; 
     
-    // 1. 优先寻找完全冷却的 Key
+    // 1. 优先寻找空闲 Key
     const shuffled = keys.sort(() => 0.5 - Math.random());
     
     for (const key of shuffled) {
@@ -35,14 +33,12 @@ export class AIDispatcher {
       const lastUsed = keyUsageHistory[cleanKey] || 0;
       if (now - lastUsed > cooldown) {
         keyUsageHistory[cleanKey] = now;
-        return cleanKey; // 完美，找到一个空闲的
+        return cleanKey; 
       }
     }
 
-    // 2. 🚨 紧急回退：如果所有 Key 都在冷却，找出那个“休息最久”的 Key 强制使用
-    // 防止游戏因为 Key 不够而彻底卡死
-    console.warn(`[AI Dispatcher] Warning: All keys busy. Forcing oldest key.`);
-    
+    // 2. 强制回退 (防卡死)
+    // 对于实名账号，其实很少会走到这一步，除非你并发太高
     let oldestKey = keys[0];
     let oldestTime = now;
 
@@ -55,7 +51,6 @@ export class AIDispatcher {
       }
     }
 
-    // 强制更新这个 Key 的时间
     keyUsageHistory[oldestKey] = now;
     return oldestKey;
   }
@@ -64,11 +59,9 @@ export class AIDispatcher {
     const keys = this.getKeys(mode);
     if (keys.length === 0) return null;
 
-    // 获取 Key (保证不返回 null)
     const apiKey = this.getAvailableKey(keys);
-
     const endpoint = 'https://api.siliconflow.cn/v1/chat/completions';
-    const model = 'Qwen/Qwen2.5-7B-Instruct'; // 统一使用快模型
+    const model = 'Qwen/Qwen2.5-7B-Instruct'; 
 
     try {
       const response = await fetch(endpoint, {
@@ -84,25 +77,21 @@ export class AIDispatcher {
             { role: 'user', content: userPrompt }
           ],
           temperature: 0.7,
-          max_tokens: 512, // 限制 token 数，防止 AI 写小作文
+          max_tokens: 512, 
         })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`API Fail: ${response.status} - ${errorText}`);
+        console.warn(`API Warn: ${response.status} - ${errorText}`);
         return null; 
       }
       
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // === 核心修复：外科手术式提取 JSON ===
-      // 1. 清理 Markdown 标记
+      // 外科手术式提取 JSON
       content = content.replace(/```json/g, '').replace(/```/g, '');
-
-      // 2. 寻找第一个 '{' 和最后一个 '}'
-      // 这能有效忽略 AI 在 JSON 前后的废话
       const firstBrace = content.indexOf('{');
       const lastBrace = content.lastIndexOf('}');
 
@@ -111,11 +100,10 @@ export class AIDispatcher {
         try {
           return JSON.parse(jsonString);
         } catch (e) {
-          console.error(`[AI Parse Error] Extracted string is still invalid:`, jsonString);
+          console.error(`[AI Parse Error] Invalid JSON`, jsonString);
           return null;
         }
       } else {
-        console.error(`[AI Parse Error] No JSON braces found in:`, content);
         return null;
       }
       

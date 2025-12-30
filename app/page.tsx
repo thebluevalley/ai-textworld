@@ -1,25 +1,24 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, RefreshCw, Map as MapIcon, Shield, Zap } from 'lucide-react';
+import { Play, Pause, RefreshCw, Zap, Radio } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
-// === 游戏平衡性调整 ===
-const API_INTERVAL = 3500; // 减慢节奏：3.5秒一回合
-const MOVE_SPEED = 0.04;   // 移动变慢，看得更清楚
+// === ⚡ 极速模式 (已认证账号专用) ===
+const API_INTERVAL = 2000; // 2秒一回合
+const MOVE_SPEED = 0.08;   // 快速移动插值
 
-// === 地图障碍物 (墙壁/掩体) ===
-// 简单的坐标数组，用于绘制灰色方块
+// === 地图障碍物 ===
 const OBSTACLES = [
-  { x: 5, y: 8, w: 2, h: 4 }, // 左侧掩体
-  { x: 13, y: 8, w: 2, h: 4 }, // 右侧掩体
-  { x: 8, y: 4, w: 4, h: 1 }, // 上方墙
-  { x: 8, y: 15, w: 4, h: 1 }, // 下方墙
-  { x: 9, y: 9, w: 2, h: 2 }, // 中心碉堡
+  { x: 5, y: 8, w: 2, h: 4 }, 
+  { x: 13, y: 8, w: 2, h: 4 }, 
+  { x: 8, y: 4, w: 4, h: 1 }, 
+  { x: 8, y: 15, w: 4, h: 1 }, 
+  { x: 9, y: 9, w: 2, h: 2 }, 
 ];
 
-// === 初始单位 (血量大幅提升) ===
+// === 初始单位 (高血量 RPG 设定) ===
 const INITIAL_UNITS = [
   // 蓝队
   { id: 'b1', team: 'BLUE', role: 'LEADER', x: 2, y: 5, hp: 500, maxHp: 500, status: 'ALIVE' },
@@ -36,26 +35,24 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   
-  // 视觉特效状态
   const [attacks, setAttacks] = useState<any[]>([]);
-  const [floatingTexts, setFloatingTexts] = useState<any[]>([]); // 伤害飘字
+  const [floatingTexts, setFloatingTexts] = useState<any[]>([]); 
 
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
   
-  // 初始化
   useEffect(() => {
     units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y });
   }, []);
 
-  // === AI 循环 ===
+  // === AI 循环 (2秒极速) ===
   useEffect(() => {
     if (!isPlaying) return;
 
     const tick = async () => {
-      // 检查胜负
-      const blueCount = units.filter(u => u.team === 'BLUE' && u.hp > 0).length;
-      const redCount = units.filter(u => u.team === 'RED' && u.hp > 0).length;
-      if (blueCount === 0 || redCount === 0) {
+      // 胜负判定
+      const blueAlive = units.some(u => u.team === 'BLUE' && u.hp > 0);
+      const redAlive = units.some(u => u.team === 'RED' && u.hp > 0);
+      if (!blueAlive || !redAlive) {
         setIsPlaying(false);
         return;
       }
@@ -72,7 +69,8 @@ export default function Home() {
           body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES })
         });
 
-        if (!res.ok) return; 
+        if (!res.ok) return;
+
         const data = await res.json();
         
         if (data.actions) {
@@ -80,22 +78,19 @@ export default function Home() {
           const newTexts: any[] = [];
           
           const newLogs = data.actions.map((a: any) => {
-            // 处理移动 (增加边界限制)
             if (a.type === 'MOVE' && a.target) {
                targetsRef.current[a.unitId] = { 
                 x: Math.max(1, Math.min(19, a.target.x)), 
                 y: Math.max(1, Math.min(19, a.target.y))
               };
-              return null; // 移动不记入主日志，太吵了
+              return null; 
             }
             
-            // 处理攻击
             if (a.type === 'ATTACK' && a.targetUnitId) {
               const attacker = units.find(u => u.id === a.unitId);
               const target = units.find(u => u.id === a.targetUnitId);
               
               if (attacker && target && target.hp > 0) {
-                // 1. 添加攻击线特效
                 currentTickAttacks.push({
                   from: { x: attacker.x, y: attacker.y },
                   to: { x: target.x, y: target.y },
@@ -103,27 +98,24 @@ export default function Home() {
                   timestamp: Date.now()
                 });
 
-                // 2. 计算掩体闪避逻辑 (简单模拟)
                 const hitChance = Math.random();
-                const isHit = hitChance > 0.15; // 85% 命中率
+                const isHit = hitChance > 0.15; 
                 let finalDmg = 0;
                 let hitText = "MISS";
-                let textColor = "#fbbf24"; // 黄色 Miss
+                let textColor = "#fbbf24"; 
 
                 if (isHit) {
                   finalDmg = a.damage || 30;
-                  // 暴击逻辑
                   if (Math.random() > 0.8) {
                     finalDmg = Math.floor(finalDmg * 1.5);
                     hitText = `CRIT -${finalDmg}`;
-                    textColor = "#ff00ff"; // 紫色暴击
+                    textColor = "#ff00ff"; 
                   } else {
                     hitText = `-${finalDmg}`;
-                    textColor = "#ffffff"; // 白色普通
+                    textColor = "#ffffff"; 
                   }
                 }
 
-                // 3. 添加飘字
                 newTexts.push({
                   x: target.x,
                   y: target.y,
@@ -132,7 +124,6 @@ export default function Home() {
                   id: Date.now() + Math.random()
                 });
 
-                // 4. 扣血
                 if (finalDmg > 0) {
                   setUnits(prev => prev.map(u => {
                     if (u.id === target.id) {
@@ -143,19 +134,30 @@ export default function Home() {
                   }));
                 }
 
-                return { 
-                  text: `${a.unitId} >> ${target.id} [${hitText}]`, 
-                  type: 'ATTACK', 
-                  team: attacker.team 
-                };
+                return { text: `${a.unitId} >> ${target.id} [${hitText}]`, type: 'ATTACK', team: attacker.team };
               }
+            }
+            if (a.type === 'HEAL' && a.targetUnitId) {
+               const healer = units.find(u => u.id === a.unitId);
+               const target = units.find(u => u.id === a.targetUnitId);
+               if (healer && target && target.hp > 0) {
+                 const healAmount = a.healAmount || 40;
+                 newTexts.push({
+                    x: target.x, y: target.y, text: `+${healAmount}`, color: "#22c55e", id: Date.now() + Math.random()
+                 });
+                 setUnits(prev => prev.map(u => {
+                    if (u.id === target.id) return { ...u, hp: Math.min(u.maxHp, u.hp + healAmount) };
+                    return u;
+                 }));
+                 return { text: `${a.unitId} heals ${target.id}`, type: 'HEAL', team: healer.team };
+               }
             }
             return null;
           }).filter(Boolean);
 
           setLogs(prev => [...newLogs, ...prev].slice(0, 8));
           setAttacks(currentTickAttacks);
-          setFloatingTexts(prev => [...prev, ...newTexts]); // 累加飘字
+          setFloatingTexts(prev => [...prev, ...newTexts]);
         }
       } catch (e) {
         console.error("Tick err", e);
@@ -171,7 +173,6 @@ export default function Home() {
   useEffect(() => {
     let animationFrameId: number;
     const animate = () => {
-      // 更新单位位置
       setUnits(prevUnits => {
         return prevUnits.map(u => {
           if (u.status === 'DEAD') return u;
@@ -189,58 +190,81 @@ export default function Home() {
     return () => cancelAnimationFrame(animationFrameId);
   }, [isPlaying]);
 
+  const resetGame = () => {
+    setIsPlaying(false);
+    setUnits(INITIAL_UNITS);
+    setLogs([]);
+    setAttacks([]);
+    setFloatingTexts([]);
+    INITIAL_UNITS.forEach(u => targetsRef.current[u.id] = {x: u.x, y: u.y});
+  };
+
   return (
     <main className="h-screen w-full bg-[#111] text-slate-300 font-sans flex overflow-hidden">
       
       {/* 顶部状态栏 */}
-      <div className="absolute top-0 left-0 w-full h-16 bg-[#1a1a1a]/90 backdrop-blur border-b border-[#333] z-20 flex items-center justify-between px-8">
+      <div className="absolute top-0 left-0 w-full h-16 bg-[#1a1a1a]/90 backdrop-blur border-b border-[#333] z-20 flex items-center justify-between px-8 shadow-lg">
         <h1 className="text-xl font-black italic tracking-widest text-white flex items-center gap-2">
-          <Zap className="text-yellow-400" fill="currentColor"/>
-          NEON TACTICS
+          <Zap className="text-cyan-400" fill="currentColor"/>
+          NEON TACTICS <span className="text-[10px] text-cyan-500 font-normal not-italic border border-cyan-700 px-1 rounded bg-cyan-950">PRO MODE</span>
         </h1>
         
-        <div className="flex gap-4">
+        <div className="flex gap-8">
           <div className="flex flex-col items-end">
-             <span className="text-xs text-blue-400 font-bold">BLUE TEAM</span>
-             <div className="flex gap-1">
+             <span className="text-xs text-blue-400 font-bold tracking-wider">BLUE SQUAD</span>
+             <div className="flex gap-1 mt-1">
                {units.filter(u => u.team === 'BLUE').map(u => (
-                 <div key={u.id} className={`w-3 h-3 rounded-sm ${u.hp>0 ? 'bg-blue-500' : 'bg-slate-700'}`}/>
+                 <div key={u.id} className={`w-8 h-1.5 rounded-sm transition-all ${u.hp>0 ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]' : 'bg-slate-800'}`}/>
                ))}
              </div>
           </div>
-          <div className="w-px h-8 bg-[#444]"/>
+          
           <div className="flex flex-col items-start">
-             <span className="text-xs text-red-400 font-bold">RED TEAM</span>
-             <div className="flex gap-1">
+             <span className="text-xs text-red-400 font-bold tracking-wider">RED SQUAD</span>
+             <div className="flex gap-1 mt-1">
                {units.filter(u => u.team === 'RED').map(u => (
-                 <div key={u.id} className={`w-3 h-3 rounded-sm ${u.hp>0 ? 'bg-red-500' : 'bg-slate-700'}`}/>
+                 <div key={u.id} className={`w-8 h-1.5 rounded-sm transition-all ${u.hp>0 ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]' : 'bg-slate-800'}`}/>
                ))}
              </div>
           </div>
         </div>
 
-        <button 
-          onClick={() => setIsPlaying(!isPlaying)}
-          className={`px-8 py-2 font-bold rounded shadow-lg transition-transform active:scale-95 ${
-            isPlaying ? 'bg-slate-700 text-white' : 'bg-blue-600 text-white hover:bg-blue-500'
-          }`}
-        >
-          {isPlaying ? <span className="flex items-center gap-2"><Pause size={16}/> PAUSE</span> : <span className="flex items-center gap-2"><Play size={16}/> START BATTLE</span>}
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={() => setIsPlaying(!isPlaying)}
+            className={`px-6 py-2 font-bold rounded shadow-lg transition-all active:scale-95 flex items-center gap-2 ${
+              isPlaying ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+            }`}
+          >
+            {isPlaying ? <Pause size={16}/> : <Play size={16}/>}
+            {isPlaying ? "PAUSE" : "ENGAGE"}
+          </button>
+          
+          <button 
+            onClick={resetGame}
+            className="p-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+          >
+            <RefreshCw size={16}/>
+          </button>
+        </div>
       </div>
 
-      {/* 游戏主舞台 */}
       <div className="flex-1 relative bg-[#0d0d0d] flex items-center justify-center pt-16">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#1a1a1a_0%,#000_100%)] pointer-events-none"/>
         <TacticalViewport units={units} attacks={attacks} obstacles={OBSTACLES} floatingTexts={floatingTexts} />
         
-        {/* 左下角日志 */}
-        <div className="absolute bottom-8 left-8 w-80 bg-black/60 p-4 rounded border border-white/10 pointer-events-none">
-           <div className="text-xs font-bold text-slate-500 mb-2">COMBAT LOG</div>
-           {logs.map((log, i) => (
-             <div key={i} className={`text-xs mb-1 font-mono ${log.team === 'BLUE' ? 'text-blue-300' : 'text-red-300'}`}>
-               {log.text}
-             </div>
-           ))}
+        <div className="absolute bottom-6 left-6 w-96 bg-black/80 backdrop-blur-md p-4 rounded-lg border border-white/10 pointer-events-none shadow-2xl">
+           <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-3 border-b border-white/10 pb-2">
+             <Radio size={12}/> COMBAT LOG (REALTIME)
+           </div>
+           <div className="space-y-1.5">
+             {logs.map((log, i) => (
+               <div key={i} className={`text-[11px] font-mono flex items-center gap-2 ${log.team === 'BLUE' ? 'text-blue-300' : 'text-red-300'}`}>
+                 <span className={`w-1 h-1 rounded-full ${log.team === 'BLUE' ? 'bg-blue-500' : 'bg-red-500'}`}/>
+                 {log.text}
+               </div>
+             ))}
+           </div>
         </div>
       </div>
     </main>
