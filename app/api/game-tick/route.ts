@@ -4,56 +4,41 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 export async function POST(req: Request) {
   const { units, obstacles, mapSize } = await req.json();
 
-  const systemPrompt = `You are the WARGAME ENGINE. You control ALL units (BLUE and RED).
+  const systemPrompt = `You are a PRO GAMER AI playing a deathmatch.
   Map: ${mapSize}x${mapSize}.
   
-  CRITICAL INSTRUCTION:
-  You must generate actions for EVERY SINGLE living unit provided in the input. 
-  DO NOT ignore the Red Team.
+  OBJECTIVE: ELIMINATE ENEMY TEAM.
   
-  ROLE DOCTRINE (Follow Strictly):
-  1. 🛡️ MEDIC: 
-     - Stay BEHIND allies. 
-     - If ally HP < 70%, MOVE to them immediately.
-     - THOUGHT: "Rushing to aid", "Staying safe".
+  STRATEGY RULES (HUMAN-LIKE BEHAVIOR):
+  1. 🔫 IF ENEMY VISIBLE: SHOOT! Do not move. Shooting is free. Moving risks exposure.
+  2. 🛡️ IF UNDER FIRE: Move to nearest OBSTACLE (Wall) for cover.
+  3. 🏃 IF NO ENEMY: 
+     - ASSAULT: Rush to map center (15,15).
+     - SNIPER: Move to corners or long hallways.
+     - LEADER: Flank around the edges.
   
-  2. 🔭 SNIPER:
-     - Keep distance > 15 tiles from enemies.
-     - Find long sightlines. DO NOT rush center.
-     - THOUGHT: "Holding angle", "Relocating to high ground".
+  CRITICAL:
+  - You control BOTH Blue and Red teams.
+  - RED TEAM MUST BE AGGRESSIVE.
+  - Output coordinates must be Integers.
   
-  3. ⚔️ ASSAULT / LEADER:
-     - Aggressive. Close distance to < 8 tiles.
-     - If distance < 5: FIRE at will.
-     - THOUGHT: "Breaching", "Suppressing fire", "Flanking right".
-  
-  GENERAL TACTICS:
-  - If no enemies visible: Blue moves South-East, Red moves North-West (Search pattern).
-  - Use Obstacles: End turn near walls for cover.
-  
-  Output Example:
-  {
-    "actions": [
-      { "unitId": "b1", "type": "MOVE", "target": {"x":10,"y":10}, "thought": "Leading the charge" },
-      { "unitId": "r1", "type": "MOVE", "target": {"x":20,"y":20}, "thought": "Intercepting Blue" }
-    ]
-  }
+  Format:
+  { "actions": [{ "unitId": "b1", "type": "ATTACK", "targetUnitId": "r1", "damage": 50, "thought": "Gotcha!" }] }
   `;
 
-  // 整理数据，明确标记队伍，强迫 AI 看到红队
+  // 精简数据
   const promptData = units.map((u: any) => ({
-    id: u.id, 
-    team: u.team, 
-    role: u.role, 
-    pos: u.pos, 
-    hp: u.hp,
-    // 简化可见列表，只保留 ID，节省 token
-    visibleEnemies: u.visibleEnemies.map((e:any) => e.id) 
+    id: u.id, team: u.team, pos: u.pos, hp: u.hp, role: u.role,
+    // 只有当有敌人可见时才发 enemy 列表
+    visibleEnemies: u.visibleEnemies.map((e:any) => ({ id: e.id, hp: e.hp, pos: e.pos }))
   }));
 
+  // 把障碍物概略告诉 AI (只发前5个大的，省token)
+  const mainCover = obstacles.slice(0, 5).map((o:any) => ({ x: o.x, y: o.y }));
+
   const userPrompt = JSON.stringify({
-    all_units_on_field: promptData, // 强调这是场上所有单位
-    map_obstacles: obstacles
+    units_status: promptData,
+    cover_locations: mainCover
   });
 
   const result = await AIDispatcher.chatCompletion({
@@ -62,9 +47,6 @@ export async function POST(req: Request) {
     userPrompt
   });
 
-  // 容错：如果 AI 还是没返回红队数据，我们在前端或者这里很难补救，
-  // 但新的 Prompt 强调了 "EVERY SINGLE unit"，通常能解决问题。
-  
   if (result && result.error === 429) {
     return NextResponse.json({ actions: [] }, { status: 429 });
   }
