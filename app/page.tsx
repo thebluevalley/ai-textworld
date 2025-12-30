@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, ShieldAlert, Crosshair, Trophy, Flame } from 'lucide-react';
+// ⬇️ 修复：包含所有需要的图标
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, ShieldAlert, Crosshair, Trophy, Flame, Users } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
@@ -10,8 +11,8 @@ const MAP_SIZE = 30;
 
 // === ⚔️ 武器参数 ===
 const WEAPON_STATS: any = {
-  SNIPER:  { range: 30, damage: 120, cooldown: 3500, accuracy: 0.95, suppression: 80 }, // 狙击枪压制力极高
-  ASSAULT: { range: 10, damage: 20,  cooldown: 500,  accuracy: 0.75, suppression: 15 }, // 突击步枪靠频率压制
+  SNIPER:  { range: 30, damage: 120, cooldown: 3500, accuracy: 0.95, suppression: 80 }, 
+  ASSAULT: { range: 10, damage: 20,  cooldown: 500,  accuracy: 0.75, suppression: 15 }, 
   LEADER:  { range: 15, damage: 35,  cooldown: 1000, accuracy: 0.85, suppression: 30 },
   MEDIC:   { range: 8,  damage: 15,  cooldown: 800,  accuracy: 0.70, suppression: 10 },
 };
@@ -22,7 +23,6 @@ const OBSTACLES = [
   { x: 2, y: 15, w: 4, h: 1 }, { x: 24, y: 15, w: 4, h: 1 },
 ];
 
-// 增加 suppression (0-100)
 const INITIAL_UNITS = [
   { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
   { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
@@ -41,6 +41,7 @@ export default function Home() {
   const [moveLines, setMoveLines] = useState<any[]>([]);
   const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
   const [spottedUnits, setSpottedUnits] = useState<Set<string>>(new Set());
+  const [logs, setLogs] = useState<any[]>([]); // 补回 logs
   
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
   const unitsRef = useRef(units); 
@@ -49,7 +50,6 @@ export default function Home() {
   useEffect(() => { unitsRef.current = units; }, [units]);
   useEffect(() => { units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y }); }, []);
 
-  // 物理检测函数
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
     const rx = rect.x + 0.1; const ry = rect.y + 0.1; const rw = rect.w - 0.2; const rh = rect.h - 0.2;
     const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
@@ -88,7 +88,7 @@ export default function Home() {
       nextUnits.forEach(attacker => {
         if (attacker.status === 'DEAD') return;
         
-        // 压制惩罚：如果被压制 (>50)，冷却时间加倍（射速变慢）
+        // 压制惩罚：射速变慢
         const isSuppressed = (attacker.suppression || 0) > 50;
         const stats = WEAPON_STATS[attacker.role] || WEAPON_STATS['ASSAULT'];
         const effectiveCooldown = isSuppressed ? stats.cooldown * 1.5 : stats.cooldown;
@@ -96,7 +96,6 @@ export default function Home() {
         let bestTarget: any = null;
         let minDist = Infinity;
 
-        // 索敌
         nextUnits.forEach(target => {
           if (target.team === attacker.team || target.status === 'DEAD') return;
           const dist = Math.sqrt(Math.pow(attacker.x - target.x, 2) + Math.pow(attacker.y - target.y, 2));
@@ -114,12 +113,11 @@ export default function Home() {
           }
         });
 
-        // 开火
         if (bestTarget) {
           attacker.lastShot = now;
           hasUpdates = true;
           
-          // 压制惩罚：如果被压制，命中率减半
+          // 压制惩罚：命中率减半
           const accuracy = isSuppressed ? stats.accuracy * 0.5 : stats.accuracy;
           const isHit = Math.random() < accuracy;
           
@@ -129,10 +127,9 @@ export default function Home() {
             color: attacker.team === 'BLUE' ? 0x60a5fa : 0xf87171,
             isMiss: !isHit,
             timestamp: now,
-            isSuppressionFire: isSuppressed // 用于视觉特效
+            isSuppressionFire: isSuppressed 
           });
 
-          // 无论是否命中，目标都会受到压制值增加
           bestTarget.suppression = Math.min(100, (bestTarget.suppression || 0) + (stats.suppression || 10));
 
           if (isHit) {
@@ -147,7 +144,6 @@ export default function Home() {
                newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: `-${dmg}`, color: "#fff", life: 60, id: Math.random() });
             }
           } else {
-            // Miss 飘字：如果是因为被压制导致的Miss，显示 "SUPPRESSED!"
             if (isSuppressed) {
                newTexts.push({ x: attacker.x, y: attacker.y, text: "PINNED!", color: "#f59e0b", life: 40, id: Math.random() });
             } else {
@@ -157,9 +153,9 @@ export default function Home() {
         }
       });
 
-      // 每一帧，所有单位的压制值缓慢恢复
+      // 压制值恢复
       nextUnits.forEach(u => {
-        if (u.suppression > 0) u.suppression = Math.max(0, u.suppression - 2); // 每200ms恢复2点
+        if (u.suppression > 0) u.suppression = Math.max(0, u.suppression - 2); 
       });
 
       setSpottedUnits(currentlySpotted);
@@ -175,7 +171,7 @@ export default function Home() {
     return () => clearInterval(reflexInterval);
   }, [isPlaying]);
 
-  // AI 循环 (保持不变)
+  // AI 循环
   const runAiLoop = async () => {
     if (!isPlaying) return;
     setNetStatus('SENDING');
@@ -191,7 +187,7 @@ export default function Home() {
           .map(other => ({ id: other.id, pos: {x: other.x, y: other.y}, hp: other.hp, role: other.role }));
         return { 
           id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp, 
-          suppression: u.suppression, // 传给 AI 压制状态
+          suppression: u.suppression, 
           visibleEnemies 
         };
       });
@@ -233,7 +229,7 @@ export default function Home() {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [isPlaying]);
 
-  // 动画循环 (处理移动速度)
+  // 动画循环
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -244,7 +240,7 @@ export default function Home() {
         const dx = target.x - u.x; const dy = target.y - u.y;
         if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return { ...u, x: target.x, y: target.y };
         
-        // 压制惩罚：如果被压制 (>50)，移动速度减半
+        // 压制惩罚：移动速度减半
         const isSuppressed = (u.suppression || 0) > 50;
         const speed = isSuppressed ? BASE_SPEED * 0.5 : BASE_SPEED;
 
@@ -286,6 +282,7 @@ export default function Home() {
       </div>
 
       <div className="absolute bottom-0 left-0 w-full h-32 bg-[#0f172a]/95 border-t border-slate-800 flex divide-x divide-slate-800 z-30">
+        {/* 数据面板 */}
         <div className="flex-1 p-4 flex flex-col gap-2">
            <div className="flex justify-between items-center text-blue-400 font-bold mb-1 border-b border-blue-900/50 pb-1">
              <span>BLUE TEAM</span>
@@ -301,7 +298,6 @@ export default function Home() {
                  <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
                    <div className="h-full bg-blue-500" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
                  </div>
-                 {/* 压制条 */}
                  <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                     <div className="h-full bg-yellow-500 transition-all" style={{ width: `${u.suppression}%` }}/>
                  </div>

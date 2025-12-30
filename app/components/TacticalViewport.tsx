@@ -3,7 +3,7 @@ import { Stage, Graphics, Container, Text } from '@pixi/react';
 import { TextStyle } from 'pixi.js';
 import { useEffect, useState } from 'react';
 
-// ... drawDashedLine, FloatingText, Grid, ObstaclesLayer, MoveLines (保持不变) ...
+// === 辅助函数：绘制虚线 ===
 const drawDashedLine = (g: any, p1: any, p2: any, dashLen = 4, gapLen = 2) => {
   const dx = p2.x - p1.x; const dy = p2.y - p1.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
@@ -19,19 +19,44 @@ const drawDashedLine = (g: any, p1: any, p2: any, dashLen = 4, gapLen = 2) => {
     currentDist += gapLen;
   }
 };
+
+// === 飘字组件 ===
 const FloatingText = ({ x, y, text, color, cellSize, life }: any) => {
   const yOffset = (60 - life) * 0.5;
   const opacity = life / 60; 
   return <Text text={text} x={x * cellSize} y={y * cellSize - 20 - yOffset} anchor={0.5} alpha={opacity} style={new TextStyle({ fontSize: cellSize * 0.6, fontWeight: 'bold', fill: color, stroke: 'black', strokeThickness: 2 })} />;
 };
+
+// === 网格组件 ===
 const Grid = ({ mapSize, cellSize }: any) => {
-    const draw = (g: any) => { g.clear(); g.lineStyle(1, 0x333344, 0.3); for (let i = 0; i <= mapSize; i++) { g.moveTo(i * cellSize, 0); g.lineTo(i * cellSize, 800); g.moveTo(0, i * cellSize); g.lineTo(800, i * cellSize); } };
+    const draw = (g: any) => { 
+      g.clear(); 
+      g.lineStyle(1, 0x333344, 0.3); 
+      for (let i = 0; i <= mapSize; i++) { 
+        g.moveTo(i * cellSize, 0); g.lineTo(i * cellSize, 800); 
+        g.moveTo(0, i * cellSize); g.lineTo(800, i * cellSize); 
+      } 
+    };
     return <Graphics draw={draw} />;
 };
+
+// === 障碍物组件 ===
 const ObstaclesLayer = ({ data, cellSize }: any) => {
-    const draw = (g: any) => { g.clear(); g.beginFill(0x334155); g.lineStyle(1, 0x475569); data.forEach((obs: any) => { g.drawRect(obs.x * cellSize, obs.y * cellSize, obs.w * cellSize, obs.h * cellSize); g.beginFill(0x1e293b); g.drawRect((obs.x + 0.2) * cellSize, (obs.y + 0.2) * cellSize, (obs.w - 0.4) * cellSize, (obs.h - 0.4) * cellSize); g.endFill(); }); g.endFill(); };
+    const draw = (g: any) => { 
+      g.clear(); 
+      g.beginFill(0x334155); g.lineStyle(1, 0x475569); 
+      data.forEach((obs: any) => { 
+        g.drawRect(obs.x * cellSize, obs.y * cellSize, obs.w * cellSize, obs.h * cellSize); 
+        g.beginFill(0x1e293b); 
+        g.drawRect((obs.x + 0.2) * cellSize, (obs.y + 0.2) * cellSize, (obs.w - 0.4) * cellSize, (obs.h - 0.4) * cellSize); 
+        g.endFill(); 
+      }); 
+      g.endFill(); 
+    };
     return <Graphics draw={draw} />;
 };
+
+// === 移动路径线 ===
 const MoveLines = ({ lines, cellSize }: any) => {
   const draw = (g: any) => {
     g.clear();
@@ -47,7 +72,7 @@ const MoveLines = ({ lines, cellSize }: any) => {
   return <Graphics draw={draw} />;
 };
 
-// === 💥 新增特效：受击火花 ===
+// === 💥 受击火花特效 ===
 const ImpactSparks = ({ attacks, cellSize }: any) => {
   const [sparks, setSparks] = useState<any[]>([]);
   
@@ -58,7 +83,6 @@ const ImpactSparks = ({ attacks, cellSize }: any) => {
     if(newSparks.length > 0) setSparks(prev => [...prev, ...newSparks]);
   }, [attacks]);
 
-  // 每一帧减少寿命
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -73,7 +97,6 @@ const ImpactSparks = ({ attacks, cellSize }: any) => {
     g.clear();
     sparks.forEach(s => {
       g.beginFill(0xffaa00, s.life / 10);
-      // 画几个随机的小点模拟火花
       g.drawCircle(s.x * cellSize + (Math.random()-0.5)*10, s.y * cellSize + (Math.random()-0.5)*10, 2);
       g.drawCircle(s.x * cellSize + (Math.random()-0.5)*10, s.y * cellSize + (Math.random()-0.5)*10, 1.5);
       g.endFill();
@@ -82,17 +105,18 @@ const ImpactSparks = ({ attacks, cellSize }: any) => {
   return <Graphics draw={draw} />;
 };
 
+// === 射击光束与枪口火焰 ===
 const LaserEffects = ({ attacks, cellSize }: any) => {
   const [visible, setVisible] = useState<any[]>([]);
-  useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 150)), [attacks]); // 持续时间缩短，更像子弹
+  useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 150)), [attacks]); 
   const draw = (g: any) => { 
     g.clear(); 
     visible.forEach((atk: any) => { 
       const alpha = atk.isMiss ? 0.3 : 0.8;
-      g.lineStyle(atk.isMiss ? 1 : 2, 0xffffaa, alpha); // 子弹是黄白色的
+      g.lineStyle(atk.isMiss ? 1 : 2, 0xffffaa, alpha); 
       drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); 
       
-      // 💥 枪口火焰 (Muzzle Flash)
+      // 枪口火焰 (Muzzle Flash)
       g.beginFill(0xffff00, 0.8);
       g.drawCircle(atk.from.x * cellSize, atk.from.y * cellSize, 4);
       g.endFill();
@@ -101,12 +125,11 @@ const LaserEffects = ({ attacks, cellSize }: any) => {
   return <Graphics draw={draw} />;
 };
 
-// === ⚡️ 更新单位组件：支持压制抖动和警告 ===
+// === 战斗单位 ===
 const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted, suppression }: any) => {
     const isDead = status === 'DEAD'; const color = team === 'BLUE' ? 0x60a5fa : 0xf87171; const radius = cellSize * 0.4;
     const isSuppressed = (suppression || 0) > 50;
     
-    // 压制抖动效果
     const shakeX = isSuppressed ? (Math.random() - 0.5) * 3 : 0;
     const shakeY = isSuppressed ? (Math.random() - 0.5) * 3 : 0;
 
@@ -114,7 +137,7 @@ const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted, su
       g.clear(); 
       if (isDead) { g.beginFill(0x1e293b); g.drawCircle(0, 0, radius); g.endFill(); return; }
       
-      // 视野范围 (淡色)
+      // 视野范围
       g.beginFill(color, 0.05); g.drawCircle(0, 0, radius * 8); g.endFill();
       
       // 实体
@@ -152,6 +175,7 @@ const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted, su
     return <Container x={x * cellSize + shakeX} y={y * cellSize + shakeY}><Graphics draw={draw} /></Container>;
 };
 
+// === 思考气泡 ===
 const SpeechBubble = ({ x, y, text, team, cellSize }: any) => {
   const [opacity, setOpacity] = useState(1);
   useEffect(() => { const timer = setTimeout(() => setOpacity(0), 2000); return () => clearTimeout(timer); }, []);
@@ -161,6 +185,7 @@ const SpeechBubble = ({ x, y, text, team, cellSize }: any) => {
   return <Container x={x * cellSize - 40} y={y * cellSize - cellSize * 2} alpha={opacity}><Graphics draw={draw} /><Text text={text} anchor={0.5} x={40} y={10} style={new TextStyle({ fontSize: 10, fill: '#ffffff', fontFamily: 'Arial', align: 'center' })} /></Container>;
 };
 
+// === 主组件 ===
 export default function TacticalViewport({ units, attacks, obstacles, floatingTexts, thoughts, moveLines, spottedUnits, mapSize = 35 }: any) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -174,10 +199,17 @@ export default function TacticalViewport({ units, attacks, obstacles, floatingTe
       <Container sortableChildren={true}>
         <MoveLines lines={moveLines} cellSize={cellSize} />
         {units.map((u: any) => (
-          <Unit key={u.id} {...u} cellSize={cellSize} zIndex={10} isSpotted={spottedUnits.has(u.id)} />
+          <Unit 
+            key={u.id} 
+            {...u} 
+            cellSize={cellSize} 
+            zIndex={10} 
+            isSpotted={spottedUnits.has(u.id)} 
+            suppression={u.suppression} // 传递压制值
+          />
         ))}
         <LaserEffects attacks={attacks} cellSize={cellSize} />
-        <ImpactSparks attacks={attacks} cellSize={cellSize} /> {/* 💥 新增火花特效层 */}
+        <ImpactSparks attacks={attacks} cellSize={cellSize} /> 
         {floatingTexts.map((ft: any) => <FloatingText key={ft.id} {...ft} cellSize={cellSize} />)}
         {thoughts && thoughts.map((t: any) => <SpeechBubble key={t.id} {...t} cellSize={cellSize} />)}
       </Container>
