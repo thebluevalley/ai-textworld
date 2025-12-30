@@ -1,38 +1,26 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, RefreshCw, Map as MapIcon, Target } from 'lucide-react';
+import { Play, Pause, RefreshCw, Map as MapIcon, Wifi, AlertTriangle } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
-const TICK_RATE = 4000; 
-const MOVE_SPEED = 0.005; // ⚡️ 极慢速移动，模拟真实行军感
-const MAP_SIZE = 50;      // ⚡️ 50x50 巨型地图
+const MOVE_SPEED = 0.005; 
+const MAP_SIZE = 50;
 
-// === 🏙️ 城市废墟布局 ===
+// === 🏙️ 障碍物 ===
 const OBSTACLES = [
-  // 左上建筑群
-  { x: 5, y: 5, w: 8, h: 5 },
-  { x: 15, y: 8, w: 5, h: 8 },
-  // 右下建筑群
-  { x: 35, y: 35, w: 10, h: 5 },
-  { x: 30, y: 30, w: 5, h: 8 },
-  // 中央死斗场 (四根柱子)
-  { x: 20, y: 20, w: 2, h: 2 },
-  { x: 28, y: 20, w: 2, h: 2 },
-  { x: 20, y: 28, w: 2, h: 2 },
-  { x: 28, y: 28, w: 2, h: 2 },
-  // 横向长墙 (掩体)
-  { x: 10, y: 40, w: 15, h: 1 },
-  { x: 25, y: 10, w: 15, h: 1 },
+  { x: 5, y: 5, w: 8, h: 5 }, { x: 15, y: 8, w: 5, h: 8 },
+  { x: 35, y: 35, w: 10, h: 5 }, { x: 30, y: 30, w: 5, h: 8 },
+  { x: 20, y: 20, w: 2, h: 2 }, { x: 28, y: 20, w: 2, h: 2 },
+  { x: 20, y: 28, w: 2, h: 2 }, { x: 28, y: 28, w: 2, h: 2 },
+  { x: 10, y: 40, w: 15, h: 1 }, { x: 25, y: 10, w: 15, h: 1 },
 ];
 
 const INITIAL_UNITS = [
-  // 蓝队 (左上集结)
   { id: 'b1', team: 'BLUE', role: 'LEADER', x: 2, y: 2, hp: 1000, maxHp: 1000, status: 'ALIVE' },
   { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 1, y: 1, hp: 600, maxHp: 600, status: 'ALIVE' },
   { id: 'b3', team: 'BLUE', role: 'MEDIC', x: 3, y: 1, hp: 800, maxHp: 800, status: 'ALIVE' },
-  // 红队 (右下集结 - 距离非常远)
   { id: 'r1', team: 'RED', role: 'LEADER', x: 48, y: 48, hp: 1000, maxHp: 1000, status: 'ALIVE' },
   { id: 'r2', team: 'RED', role: 'SNIPER', x: 49, y: 49, hp: 600, maxHp: 600, status: 'ALIVE' },
   { id: 'r3', team: 'RED', role: 'ASSAULT', x: 47, y: 47, hp: 900, maxHp: 900, status: 'ALIVE' },
@@ -44,17 +32,19 @@ export default function Home() {
   const [logs, setLogs] = useState<any[]>([]);
   const [attacks, setAttacks] = useState<any[]>([]);
   const [floatingTexts, setFloatingTexts] = useState<any[]>([]); 
-
-  const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
   
-  // 物理引擎：光线投射检测
+  // === 🚦 网络状态流控 ===
+  const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
+  
+  const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
+  const timerRef = useRef<NodeJS.Timeout | null>(null); // 用于存定时器以便清除
+
+  // 物理引擎函数保持不变...
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
-    const minX = Math.min(p1.x, p2.x);
-    const maxX = Math.max(p1.x, p2.x);
-    const minY = Math.min(p1.y, p2.y);
-    const maxY = Math.max(p1.y, p2.y);
+    const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
+    const minY = Math.min(p1.y, p2.y); const maxY = Math.max(p1.y, p2.y);
     if (rect.x > maxX || rect.x + rect.w < minX || rect.y > maxY || rect.y + rect.h < minY) return false;
-    const steps = 15; // 增加采样点，因为地图变大了
+    const steps = 15;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const px = p1.x + (p2.x - p1.x) * t;
@@ -63,18 +53,12 @@ export default function Home() {
     }
     return false;
   };
-
   const checkLineOfSight = (u1: any, u2: any) => {
-    for (const obs of OBSTACLES) {
-      if (lineIntersectsRect(u1, u2, obs)) return false;
-    }
+    for (const obs of OBSTACLES) if (lineIntersectsRect(u1, u2, obs)) return false;
     return true;
   };
-
   const isColliding = (x: number, y: number) => {
-    for (const obs of OBSTACLES) {
-      if (x > obs.x - 0.1 && x < obs.x + obs.w + 0.1 && y > obs.y - 0.1 && y < obs.y + obs.h + 0.1) return true;
-    }
+    for (const obs of OBSTACLES) if (x > obs.x - 0.1 && x < obs.x + obs.w + 0.1 && y > obs.y - 0.1 && y < obs.y + obs.h + 0.1) return true;
     return false;
   };
 
@@ -82,33 +66,43 @@ export default function Home() {
     units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y });
   }, []);
 
-  useEffect(() => {
+  // === 🧠 核心重构：递归式 AI 循环 ===
+  const runGameLoop = async () => {
     if (!isPlaying) return;
+    
+    setNetStatus('SENDING'); // 状态：发送中
 
-    const tick = async () => {
-      try {
-        const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => {
-          // 在大地图上，视距限制为 30格，太远看不见
-          const visibleEnemies = units
-            .filter(other => other.team !== u.team && other.status === 'ALIVE')
-            .filter(other => {
-               const dist = Math.sqrt(Math.pow(u.x - other.x, 2) + Math.pow(u.y - other.y, 2));
-               return dist < 35 && checkLineOfSight(u, other);
-            })
-            .map(other => ({ id: other.id, pos: {x: other.x, y: other.y}, hp: other.hp, role: other.role }));
+    try {
+      const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => {
+        const visibleEnemies = units
+          .filter(other => other.team !== u.team && other.status === 'ALIVE')
+          .filter(other => {
+             const dist = Math.sqrt(Math.pow(u.x - other.x, 2) + Math.pow(u.y - other.y, 2));
+             return dist < 35 && checkLineOfSight(u, other);
+          })
+          .map(other => ({ id: other.id, pos: {x: other.x, y: other.y}, hp: other.hp, role: other.role }));
+        return { ...u, visibleEnemies };
+      });
 
-          return { ...u, visibleEnemies };
-        });
+      const res = await fetch('/api/game-tick', {
+        method: 'POST',
+        body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES, mapSize: MAP_SIZE })
+      });
 
-        const res = await fetch('/api/game-tick', {
-          method: 'POST',
-          body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES, mapSize: MAP_SIZE })
-        });
+      // === 🛡️ 429 处理 ===
+      if (res.status === 429) {
+        console.warn("Rate Limit! Cooling down for 10s...");
+        setNetStatus('COOLING'); // 状态：冷却中
+        // 如果被限流，等 10秒 再试
+        timerRef.current = setTimeout(runGameLoop, 10000);
+        return;
+      }
 
-        if (!res.ok) return;
+      if (res.ok) {
+        setNetStatus('IDLE');
         const data = await res.json();
-        
         if (data.actions) {
+          // ... 处理逻辑 (保持不变) ...
           const currentTickAttacks: any[] = [];
           const newTexts: any[] = [];
           const newLogs: any[] = [];
@@ -129,7 +123,7 @@ export default function Home() {
                   newTexts.push({ x: attacker.x, y: attacker.y, text: "BLOCKED", color: "#888", id: Math.random() });
                   return;
                 }
-                const isHit = Math.random() > 0.2; // 80% 命中
+                const isHit = Math.random() > 0.2;
                 currentTickAttacks.push({
                   from: { x: attacker.x, y: attacker.y },
                   to: { x: target.x, y: target.y },
@@ -153,19 +147,38 @@ export default function Home() {
                 }
               }
             }
-            // Heal logic simplified for brevity
           });
           setLogs(prev => [...newLogs, ...prev].slice(0, 10));
           setAttacks(currentTickAttacks);
           setFloatingTexts(prev => [...prev, ...newTexts]);
         }
-      } catch (e) { console.error(e); }
-    };
-    tick();
-    const interval = setInterval(tick, TICK_RATE);
-    return () => clearInterval(interval);
-  }, [isPlaying, units]);
+        
+        // 成功后，等 2秒 再发下一次 (正常的 2秒间隔)
+        timerRef.current = setTimeout(runGameLoop, 2000);
+      } else {
+        // 其他错误，等 5秒 重试
+        timerRef.current = setTimeout(runGameLoop, 5000);
+      }
+    } catch (e) {
+      console.error(e);
+      timerRef.current = setTimeout(runGameLoop, 5000);
+    }
+  };
 
+  // 监听 isPlaying 变化来启动/停止循环
+  useEffect(() => {
+    if (isPlaying) {
+      runGameLoop();
+    } else {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setNetStatus('IDLE');
+    }
+    // Cleanup
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [isPlaying]);
+
+
+  // === 🎥 动画循环 ===
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -181,7 +194,6 @@ export default function Home() {
         let newY = u.y + dy * MOVE_SPEED;
         
         if (isColliding(newX, newY)) {
-           // 简单的滑墙逻辑
            if (!isColliding(newX, u.y)) newY = u.y;
            else if (!isColliding(u.x, newY)) newX = u.x;
            else return u;
@@ -199,19 +211,22 @@ export default function Home() {
       <div className="absolute top-0 left-0 w-full h-14 bg-[#0f172a] border-b border-slate-800 z-20 flex items-center justify-between px-6">
         <h1 className="text-lg font-bold text-white flex items-center gap-2">
           <MapIcon className="text-indigo-500" />
-          GRAND BATTLEFIELD <span className="text-[10px] bg-indigo-900 px-2 rounded">50x50km SECTOR</span>
+          GRAND BATTLEFIELD
+          
+          {/* 状态指示器 */}
+          {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> SYNCING</span>}
+          {netStatus === 'COOLING' && <span className="text-[10px] bg-amber-900 text-amber-200 px-2 rounded flex items-center gap-1"><AlertTriangle size={10}/> RATE LIMIT (WAITing 10s)</span>}
+        
         </h1>
         <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
           {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START OPS"}
         </button>
       </div>
       <div className="flex-1 flex items-center justify-center bg-[#020617] pt-14">
-        {/* Viewport 接收 mapSize 参数 */}
         <div className="border border-slate-800 shadow-2xl relative">
            <TacticalViewport units={units} attacks={attacks} obstacles={OBSTACLES} floatingTexts={floatingTexts} mapSize={MAP_SIZE} />
         </div>
         <div className="absolute bottom-4 left-4 w-80 bg-slate-900/90 p-3 rounded border border-slate-700 pointer-events-none">
-           <div className="text-[10px] text-slate-400 mb-2 flex gap-2"><Target size={12}/> OPERATION LOG</div>
            <div className="space-y-1">
              {logs.map((log, i) => (
                <div key={i} className={`text-[10px] ${log.team === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>{log.text}</div>
