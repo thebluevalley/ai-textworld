@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model GameSession {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  gameState Json     @map("game_state") // 存储完整的战场 JSON
+  logs      Json[]   // 存储 AI 的思维链
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("game_sessions")
+}
