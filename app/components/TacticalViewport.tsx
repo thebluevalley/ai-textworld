@@ -3,108 +3,122 @@ import { Stage, Graphics, Container, Text } from '@pixi/react';
 import { TextStyle } from 'pixi.js';
 import { useEffect, useState } from 'react';
 
-// 网格
+// === 飘字组件 ===
+const FloatingText = ({ x, y, text, color, onFinish }: any) => {
+  const [offsetY, setOffsetY] = useState(0);
+  const [opacity, setOpacity] = useState(1);
+
+  useEffect(() => {
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      setOffsetY(prev => prev - 1); // 向上飘
+      setOpacity(prev => prev - 0.02); // 变淡
+      
+      if (frame < 50) {
+        requestAnimationFrame(animate);
+      } else {
+        onFinish();
+      }
+    };
+    animate();
+  }, []);
+
+  if (opacity <= 0) return null;
+
+  return (
+    <Text 
+      text={text} 
+      x={x * 40} 
+      y={y * 40 + offsetY - 30} // 初始位置在头顶
+      anchor={0.5}
+      style={new TextStyle({
+        fontFamily: 'Arial',
+        fontSize: 16,
+        fontWeight: 'bold',
+        fill: color,
+        stroke: '#000000',
+        strokeThickness: 3,
+        dropShadow: true,
+        dropShadowDistance: 2,
+      })}
+      alpha={opacity}
+    />
+  );
+};
+
+// === 障碍物组件 ===
+const ObstaclesLayer = ({ data }: { data: any[] }) => {
+  const draw = (g: any) => {
+    g.clear();
+    g.beginFill(0x333333); // 深灰色墙体
+    g.lineStyle(2, 0x555555); // 亮灰色边框
+    
+    data.forEach(obs => {
+      g.drawRect(obs.x * 40, obs.y * 40, obs.w * 40, obs.h * 40);
+      
+      // 画点装饰细节
+      g.beginFill(0x222222);
+      g.drawCircle((obs.x + 0.5) * 40, (obs.y + 0.5) * 40, 4);
+      g.endFill();
+    });
+    g.endFill();
+  };
+  return <Graphics draw={draw} />;
+};
+
+// === 地板网格 ===
 const Grid = () => {
   const draw = (g: any) => {
     g.clear();
-    g.lineStyle(1, 0x1e293b, 1); // 这里的线颜色要配合背景
+    g.lineStyle(1, 0x222222, 1);
     for (let i = 0; i <= 20; i++) {
-      g.moveTo(i * 40, 0);
-      g.lineTo(i * 40, 800);
-      g.moveTo(0, i * 40);
-      g.lineTo(800, i * 40);
+      g.moveTo(i * 40, 0); g.lineTo(i * 40, 800);
+      g.moveTo(0, i * 40); g.lineTo(800, i * 40);
     }
   };
   return <Graphics draw={draw} />;
 };
 
-// 激光特效层
-const LaserEffects = ({ attacks }: { attacks: any[] }) => {
-  const [visibleAttacks, setVisibleAttacks] = useState<any[]>([]);
-
-  useEffect(() => {
-    // 每次 attacks 更新，都把新的加入 visible，并设置定时器移除
-    const now = Date.now();
-    // 过滤掉超过 300ms 的旧特效
-    const recent = attacks.filter(a => now - a.timestamp < 300);
-    setVisibleAttacks(recent);
-  }, [attacks]);
-
-  const draw = (g: any) => {
-    g.clear();
-    visibleAttacks.forEach(atk => {
-      g.lineStyle(2, atk.color, 0.8);
-      g.moveTo(atk.from.x * 40, atk.from.y * 40);
-      g.lineTo(atk.to.x * 40, atk.to.y * 40);
-      
-      // 画个击中点爆炸效果
-      g.beginFill(atk.color);
-      g.drawCircle(atk.to.x * 40, atk.to.y * 40, 4);
-      g.endFill();
-    });
-  };
-
-  return <Graphics draw={draw} />;
-};
-
-// 战斗单位
+// === 战斗单位 ===
 const Unit = ({ x, y, hp, maxHp, team, role, status, id }: any) => {
   const isDead = status === 'DEAD';
-  const color = isDead ? 0x475569 : (team === 'BLUE' ? 0x3b82f6 : 0xef4444); // 蓝 vs 红
+  const color = team === 'BLUE' ? 0x3b82f6 : 0xef4444; 
   
-  const textStyle = new TextStyle({
-    fontFamily: ['Arial', 'sans-serif'],
-    fontSize: 10,
-    fontWeight: 'bold',
-    fill: isDead ? '#475569' : (team === 'BLUE' ? '#60a5fa' : '#f87171'),
-  });
-
   const draw = (g: any) => {
     g.clear();
     
     if (isDead) {
-      // 尸体：画个叉
-      g.lineStyle(2, 0x334155, 1);
-      g.moveTo(-10, -10); g.lineTo(10, 10);
-      g.moveTo(10, -10); g.lineTo(-10, 10);
+      g.beginFill(0x333333);
+      g.drawCircle(0, 0, 10);
+      g.endFill();
       return;
     }
 
-    // 1. 射程/感知圈 (选中或攻击时显示，这里为了视觉丰富一直淡淡显示)
-    g.beginFill(color, 0.05);
-    g.drawCircle(0, 0, role === 'SNIPER' ? 120 : 80);
-    g.endFill();
+    // 1. 选中光圈 (呼吸效果)
+    g.lineStyle(1, color, 0.3);
+    g.drawCircle(0, 0, 18);
 
-    // 2. 实体形状 (根据职业变化)
+    // 2. 实体 (更大更清晰)
     g.beginFill(color);
     g.lineStyle(2, 0xffffff, 0.8);
+    g.drawCircle(0, 0, 12); // 主体变大
+    g.endFill();
+
+    // 3. 血条 (更宽，更明显)
+    const hpW = 30;
+    const hpH = 5;
+    const hpY = -28;
     
-    if (role === 'LEADER') {
-      // 星星/五边形
-      g.drawStar(0, 0, 5, 12, 6);
-    } else if (role === 'SNIPER') {
-      // 三角形
-      g.drawRegularPolygon(0, 0, 3, 10, 0);
-    } else if (role === 'MEDIC') {
-      // 十字 (用两个矩形模拟)
-      g.drawRect(-4, -10, 8, 20);
-      g.drawRect(-10, -4, 20, 8);
-    } else {
-      // 突击兵：方形
-      g.drawRect(-8, -8, 16, 16);
-    }
-    g.endFill();
-
-    // 3. HP 条背景
+    // 底色
     g.beginFill(0x000000);
-    g.drawRect(-15, -25, 30, 4);
+    g.drawRect(-hpW/2, hpY, hpW, hpH);
     g.endFill();
-
-    // 4. HP 条前景
+    
+    // 血量
     const hpPercent = Math.max(0, hp / maxHp);
-    const hpColor = hpPercent > 0.5 ? 0x22c55e : (hpPercent > 0.2 ? 0xeab308 : 0xef4444);
-    g.beginFill(hpColor);
-    g.drawRect(-15, -25, 30 * hpPercent, 4);
+    g.beginFill(hpPercent > 0.5 ? 0x22c55e : 0xff0000);
+    g.drawRect(-hpW/2, hpY, hpW * hpPercent, hpH);
     g.endFill();
   };
 
@@ -112,35 +126,57 @@ const Unit = ({ x, y, hp, maxHp, team, role, status, id }: any) => {
     <Container x={x * 40} y={y * 40}>
       <Graphics draw={draw} />
       {!isDead && (
-        <Text text={`${role.substring(0,1)}-${id}`} anchor={0.5} y={20} style={textStyle} />
+        <Text 
+          text={`${role}`} 
+          anchor={0.5} 
+          y={25} 
+          style={new TextStyle({ fontSize: 10, fill: '#888', fontWeight: 'bold' })} 
+        />
       )}
     </Container>
   );
 };
 
-export default function TacticalViewport({ units, attacks }: { units: any[], attacks: any[] }) {
-  const [mounted, setMounted] = useState(false);
-
+// === 激光层 ===
+const LaserEffects = ({ attacks }: { attacks: any[] }) => {
+  const [visible, setVisible] = useState<any[]>([]);
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    // 只显示最近 200ms 的攻击
+    setVisible(attacks.filter(a => Date.now() - a.timestamp < 200));
+  }, [attacks, visible]); // 依赖 visible 触发重绘
 
-  if (!mounted) return <div className="text-cyan-500 animate-pulse">LOADING HOLO-DECK...</div>;
+  const draw = (g: any) => {
+    g.clear();
+    visible.forEach(atk => {
+      g.lineStyle(3, atk.color, 0.8);
+      g.moveTo(atk.from.x * 40, atk.from.y * 40);
+      g.lineTo(atk.to.x * 40, atk.to.y * 40);
+    });
+  };
+  return <Graphics draw={draw} />;
+};
+
+export default function TacticalViewport({ units, attacks, obstacles, floatingTexts }: any) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) return <div className="text-white">LOADING...</div>;
 
   return (
-    <Stage 
-      width={800} 
-      height={800} 
-      options={{ background: 0x0f172a, antialias: true, resolution: 2 }}
-    >
-      <Grid />
-      <Container sortableChildren={true}>
-        {units.map((u) => (
-          <Unit key={u.id} {...u} zIndex={10} />
-        ))}
-        {/* 激光层放在最上面 */}
-        <LaserEffects attacks={attacks} />
-      </Container>
-    </Stage>
+    <div className="relative shadow-2xl border border-white/10 rounded-lg overflow-hidden">
+      <Stage width={800} height={800} options={{ background: 0x111111, antialias: true }}>
+        <Grid />
+        <ObstaclesLayer data={obstacles} />
+        
+        <Container sortableChildren={true}>
+          {units.map((u: any) => <Unit key={u.id} {...u} zIndex={10} />)}
+          <LaserEffects attacks={attacks} />
+          {/* 飘字层 */}
+          {floatingTexts.map((ft: any) => (
+             <FloatingText key={ft.id} {...ft} onFinish={()=>{}} />
+          ))}
+        </Container>
+      </Stage>
+    </div>
   );
 }
