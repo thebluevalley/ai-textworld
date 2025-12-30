@@ -2,39 +2,70 @@ import { NextResponse } from 'next/server';
 import { AIDispatcher } from '@/utils/ai-dispatcher';
 
 export async function POST(req: Request) {
-  const { units, config } = await req.json();
+  const { units } = await req.json();
 
-  // 1. 构建 Prompt (针对 2秒 快速模式优化)
-  const systemPrompt = `You are a real-time tactical AI.
-  Output strict JSON only.
-  Language: Simplified Chinese (简体中文).
+  // 1. 构建战术 Prompt (Dungeon Master 模式)
+  const systemPrompt = `You are the AI Engine for a Turn-Based Tactical RPG (like XCOM).
+  Control TWO squads: BLUE TEAM vs RED TEAM.
   
-  Schema: { "actions": [{ "unitId": string, "type": "MOVE"|"ATTACK", "target": { "x": number, "y": number }, "thought": "Brief tactical reason (<10 chars)" }] }
+  Map: 20x20 Grid.
+  Roles: 
+  - LEADER: Balanced, close-range.
+  - SNIPER: Long range, high dmg, low hp.
+  - ASSAULT: Avg range, tanky.
   
-  Rules:
-  1. Map size: 20x20.
-  2. Aggression: ${config.aggression}%.
-  3. TIME SCALING: This is a FAST tick (2 seconds).
-  4. Micro-management: Move units small distances (1-2 steps) but frequently to dodge or flank. 
-  5. If close to enemy, prefer flanking positions over direct charge.
-  6. 'thought' must be in Chinese.
+  OBJECTIVE: Eliminate the opposing team.
+  
+  INSTRUCTIONS:
+  1. Analyze positions.
+  2. Decide actions for each living unit.
+  3. Actions can be: "MOVE" or "ATTACK".
+  4. If Enemy is within range (Sniper: 8, Leader: 4, Assault: 3), PREFER ATTACK.
+  5. Calculate DAMAGE based on role (Sniper ~40, Leader ~20, Assault ~15). Randomize slightly.
+  
+  Output JSON format ONLY:
+  {
+    "actions": [
+      { 
+        "unitId": "b1", 
+        "team": "BLUE",
+        "type": "MOVE", 
+        "target": { "x": 10, "y": 10 }, 
+        "thought": "Taking cover" 
+      },
+      { 
+        "unitId": "r1", 
+        "team": "RED",
+        "type": "ATTACK", 
+        "targetUnitId": "b1", 
+        "damage": 25,
+        "thought": "Suppressing fire!" 
+      }
+    ]
+  }
+  
+  Language: English (for tactical logs). Keep thoughts short and military-style.
   `;
 
-  // 简化用户输入以节省 Token
+  // 简化输入，只传必要信息
   const userPrompt = JSON.stringify({
-    units: units.map((u: any) => ({ id: u.id, x: Math.round(u.x), y: Math.round(u.y), hp: u.hp, role: u.role })),
-    timestamp: Date.now()
+    units: units.map((u: any) => ({ 
+      id: u.id, 
+      team: u.team, 
+      role: u.role, 
+      x: Math.round(u.x), 
+      y: Math.round(u.y), 
+      hp: u.hp 
+    }))
   });
 
-  // 2. 调用 AI (使用 reflex 模式以求速度)
-  // AIDispatcher 内部会处理 6个 Key 的轮询
+  // 2. 调用 AI
   const result = await AIDispatcher.chatCompletion({
-    mode: 'reflex',
+    mode: 'reflex', // 依然用快模型，反应更灵敏
     systemPrompt,
     userPrompt
   });
 
-  // 3. 兜底处理
   if (!result || !result.actions) {
     return NextResponse.json({ actions: [] });
   }

@@ -1,21 +1,16 @@
 'use client';
 import { Stage, Graphics, Container, Text } from '@pixi/react';
 import { TextStyle } from 'pixi.js';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
-// === 新增：网格背景组件 ===
-// 画布 800x800，分为 20x20 格，每格 40px
+// 网格
 const Grid = () => {
   const draw = (g: any) => {
     g.clear();
-    g.lineStyle(1, 0x333333, 0.3); // 深灰色细线，低透明度
-    // 画纵线
+    g.lineStyle(1, 0x1e293b, 1); // 这里的线颜色要配合背景
     for (let i = 0; i <= 20; i++) {
       g.moveTo(i * 40, 0);
       g.lineTo(i * 40, 800);
-    }
-    // 画横线
-    for (let i = 0; i <= 20; i++) {
       g.moveTo(0, i * 40);
       g.lineTo(800, i * 40);
     }
@@ -23,82 +18,129 @@ const Grid = () => {
   return <Graphics draw={draw} />;
 };
 
-// === 升级：单位组件 (增加光圈和文字标签) ===
-const Unit = ({ x, y, color, id, role }: any) => {
-  // 定义文字样式
+// 激光特效层
+const LaserEffects = ({ attacks }: { attacks: any[] }) => {
+  const [visibleAttacks, setVisibleAttacks] = useState<any[]>([]);
+
+  useEffect(() => {
+    // 每次 attacks 更新，都把新的加入 visible，并设置定时器移除
+    const now = Date.now();
+    // 过滤掉超过 300ms 的旧特效
+    const recent = attacks.filter(a => now - a.timestamp < 300);
+    setVisibleAttacks(recent);
+  }, [attacks]);
+
+  const draw = (g: any) => {
+    g.clear();
+    visibleAttacks.forEach(atk => {
+      g.lineStyle(2, atk.color, 0.8);
+      g.moveTo(atk.from.x * 40, atk.from.y * 40);
+      g.lineTo(atk.to.x * 40, atk.to.y * 40);
+      
+      // 画个击中点爆炸效果
+      g.beginFill(atk.color);
+      g.drawCircle(atk.to.x * 40, atk.to.y * 40, 4);
+      g.endFill();
+    });
+  };
+
+  return <Graphics draw={draw} />;
+};
+
+// 战斗单位
+const Unit = ({ x, y, hp, maxHp, team, role, status, id }: any) => {
+  const isDead = status === 'DEAD';
+  const color = isDead ? 0x475569 : (team === 'BLUE' ? 0x3b82f6 : 0xef4444); // 蓝 vs 红
+  
   const textStyle = new TextStyle({
-    fontFamily: ['JetBrains Mono', 'monospace'], // 优先使用我们配置的字体
-    fontSize: 12,
+    fontFamily: ['Arial', 'sans-serif'],
+    fontSize: 10,
     fontWeight: 'bold',
-    fill: '#aaaaaa', // 浅灰色文字
-    align: 'center',
+    fill: isDead ? '#475569' : (team === 'BLUE' ? '#60a5fa' : '#f87171'),
   });
 
   const draw = (g: any) => {
     g.clear();
     
-    // 1. 范围光圈 (半透明) - 假设感知范围是 3 格
-    g.beginFill(color, 0.15);
-    g.drawCircle(0, 0, 3 * 40); 
+    if (isDead) {
+      // 尸体：画个叉
+      g.lineStyle(2, 0x334155, 1);
+      g.moveTo(-10, -10); g.lineTo(10, 10);
+      g.moveTo(10, -10); g.lineTo(-10, 10);
+      return;
+    }
+
+    // 1. 射程/感知圈 (选中或攻击时显示，这里为了视觉丰富一直淡淡显示)
+    g.beginFill(color, 0.05);
+    g.drawCircle(0, 0, role === 'SNIPER' ? 120 : 80);
     g.endFill();
 
-    // 2. 单位核心实体
+    // 2. 实体形状 (根据职业变化)
     g.beginFill(color);
-    g.lineStyle(2, 0xffffff, 0.8); // 加个白边让它更突出
-    g.drawCircle(0, 0, 10);
+    g.lineStyle(2, 0xffffff, 0.8);
+    
+    if (role === 'LEADER') {
+      // 星星/五边形
+      g.drawStar(0, 0, 5, 12, 6);
+    } else if (role === 'SNIPER') {
+      // 三角形
+      g.drawRegularPolygon(0, 0, 3, 10, 0);
+    } else if (role === 'MEDIC') {
+      // 十字 (用两个矩形模拟)
+      g.drawRect(-4, -10, 8, 20);
+      g.drawRect(-10, -4, 20, 8);
+    } else {
+      // 突击兵：方形
+      g.drawRect(-8, -8, 16, 16);
+    }
+    g.endFill();
+
+    // 3. HP 条背景
+    g.beginFill(0x000000);
+    g.drawRect(-15, -25, 30, 4);
+    g.endFill();
+
+    // 4. HP 条前景
+    const hpPercent = Math.max(0, hp / maxHp);
+    const hpColor = hpPercent > 0.5 ? 0x22c55e : (hpPercent > 0.2 ? 0xeab308 : 0xef4444);
+    g.beginFill(hpColor);
+    g.drawRect(-15, -25, 30 * hpPercent, 4);
     g.endFill();
   };
 
-  // 注意：PixiJS 容器坐标是像素值，所以要乘以 40
   return (
     <Container x={x * 40} y={y * 40}>
       <Graphics draw={draw} />
-      {/* ID 标签显示在单位上方 */}
-      <Text 
-        text={id.toUpperCase()} 
-        anchor={0.5} 
-        y={-25} 
-        style={textStyle} 
-      />
-      {/* 角色标签显示在单位下方，字小一点 */}
-      <Text 
-        text={`[${role}]`} 
-        anchor={0.5} 
-        y={25} 
-        style={new TextStyle({ ...textStyle, fontSize: 10, fill: color })} 
-      />
+      {!isDead && (
+        <Text text={`${role.substring(0,1)}-${id}`} anchor={0.5} y={20} style={textStyle} />
+      )}
     </Container>
   );
 };
 
-export default function TacticalViewport({ units }: { units: any[] }) {
+export default function TacticalViewport({ units, attacks }: { units: any[], attacks: any[] }) {
   const [mounted, setMounted] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  if (!mounted) return <div className="w-full h-full flex items-center justify-center text-neutral-600 animate-pulse tracking-widest">INITIALIZING TACTICAL DISPLAY...</div>;
+  if (!mounted) return <div className="text-cyan-500 animate-pulse">LOADING HOLO-DECK...</div>;
 
   return (
-    <div ref={containerRef} className="w-full h-full flex items-center justify-center bg-[#141414]">
-      <Stage 
-        width={800} 
-        height={800} 
-        // 修改背景色为深灰色 (0x141414)，而不是纯黑
-        options={{ background: 0x141414, antialias: true, resolution: window.devicePixelRatio || 1 }}
-        className="border border-neutral-800 shadow-2xl shadow-black/50 rounded-sm"
-      >
-        {/* 先画网格在最底层 */}
-        <Grid />
-        {/* 再画单位层 */}
-        <Container sortableChildren={true}>
-          {units.map((u) => (
-            <Unit key={u.id} {...u} zIndex={10} />
-          ))}
-        </Container>
-      </Stage>
-    </div>
+    <Stage 
+      width={800} 
+      height={800} 
+      options={{ background: 0x0f172a, antialias: true, resolution: 2 }}
+    >
+      <Grid />
+      <Container sortableChildren={true}>
+        {units.map((u) => (
+          <Unit key={u.id} {...u} zIndex={10} />
+        ))}
+        {/* 激光层放在最上面 */}
+        <LaserEffects attacks={attacks} />
+      </Container>
+    </Stage>
   );
 }
