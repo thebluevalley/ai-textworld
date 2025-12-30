@@ -3,6 +3,7 @@ import { Stage, Graphics, Container, Text } from '@pixi/react';
 import { TextStyle } from 'pixi.js';
 import { useEffect, useState } from 'react';
 
+// ... drawDashedLine, FloatingText, Grid, ObstaclesLayer, MoveLines, LaserEffects (保持不变) ...
 const drawDashedLine = (g: any, p1: any, p2: any, dashLen = 4, gapLen = 2) => {
   const dx = p2.x - p1.x; const dy = p2.y - p1.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
@@ -18,33 +19,11 @@ const drawDashedLine = (g: any, p1: any, p2: any, dashLen = 4, gapLen = 2) => {
     currentDist += gapLen;
   }
 };
-
-// === ⚡️ 无状态飘字组件 ===
-// 完全由 props.life 驱动，父组件负责减少 life
 const FloatingText = ({ x, y, text, color, cellSize, life }: any) => {
-  // life 初始是 60，慢慢变 0
-  // 随着生命流逝，向上飘 (60 - life) * 0.5 像素
   const yOffset = (60 - life) * 0.5;
-  const opacity = life / 60; // 透明度随生命周期线性衰减
-
-  return (
-    <Text 
-      text={text} 
-      x={x * cellSize} 
-      y={y * cellSize - 20 - yOffset} // 初始在头顶，然后上飘
-      anchor={0.5}
-      alpha={opacity} // 渐隐
-      style={new TextStyle({ 
-        fontSize: cellSize * 0.6, 
-        fontWeight: 'bold', 
-        fill: color, 
-        stroke: 'black', 
-        strokeThickness: 2 
-      })} 
-    />
-  );
+  const opacity = life / 60; 
+  return <Text text={text} x={x * cellSize} y={y * cellSize - 20 - yOffset} anchor={0.5} alpha={opacity} style={new TextStyle({ fontSize: cellSize * 0.6, fontWeight: 'bold', fill: color, stroke: 'black', strokeThickness: 2 })} />;
 };
-
 const Grid = ({ mapSize, cellSize }: any) => {
     const draw = (g: any) => { g.clear(); g.lineStyle(1, 0x333344, 0.3); for (let i = 0; i <= mapSize; i++) { g.moveTo(i * cellSize, 0); g.lineTo(i * cellSize, 800); g.moveTo(0, i * cellSize); g.lineTo(800, i * cellSize); } };
     return <Graphics draw={draw} />;
@@ -67,28 +46,50 @@ const MoveLines = ({ lines, cellSize }: any) => {
   };
   return <Graphics draw={draw} />;
 };
-const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize }: any) => {
-    const isDead = status === 'DEAD'; const color = team === 'BLUE' ? 0x60a5fa : 0xf87171; const radius = cellSize * 0.4;
-    const draw = (g: any) => {
-      g.clear(); if (isDead) { g.beginFill(0x1e293b); g.drawCircle(0, 0, radius); g.endFill(); return; }
-      g.beginFill(color, 0.05); g.drawCircle(0, 0, radius * 8); g.endFill();
-      g.lineStyle(1, 0xffffff, 0.8); g.beginFill(color); g.drawCircle(0, 0, radius); g.endFill();
-      g.lineStyle(2, 0xffffff, 0.9);
-      if (role === 'SNIPER') { g.drawCircle(0, 0, radius * 0.5); g.moveTo(-radius, 0); g.lineTo(radius, 0); g.moveTo(0, -radius); g.lineTo(0, radius); } 
-      else if (role === 'MEDIC') { g.moveTo(0, -radius*0.6); g.lineTo(0, radius*0.6); g.moveTo(-radius*0.6, 0); g.lineTo(radius*0.6, 0); } 
-      else if (role === 'LEADER') { g.drawPolygon([-radius*0.4, 0, 0, -radius*0.8, radius*0.4, 0, 0, radius*0.8]); }
-      const hpW = cellSize; const hpH = cellSize * 0.15; const hpY = -radius - hpH - 2;
-      g.beginFill(0x000000); g.drawRect(-hpW/2, hpY, hpW, hpH); g.endFill();
-      const hpPercent = Math.max(0, hp / maxHp); g.beginFill(hpPercent > 0.5 ? 0x22c55e : 0xff0000); g.drawRect(-hpW/2, hpY, hpW * hpPercent, hpH); g.endFill();
-    };
-    return <Container x={x * cellSize} y={y * cellSize}><Graphics draw={draw} /></Container>;
-};
 const LaserEffects = ({ attacks, cellSize }: any) => {
   const [visible, setVisible] = useState<any[]>([]);
   useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 300)), [attacks]);
   const draw = (g: any) => { g.clear(); visible.forEach((atk: any) => { g.lineStyle(atk.isMiss ? 1 : 2, atk.color, atk.isMiss ? 0.3 : 0.8); drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); if (!atk.isMiss) { g.beginFill(0xffffff, 0.8); g.drawCircle(atk.to.x*cellSize, atk.to.y*cellSize, 2); g.endFill(); } }); };
   return <Graphics draw={draw} />;
 };
+
+// === ⚡️ 更新的单位组件：支持“被发现”标记 ===
+const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted }: any) => {
+    const isDead = status === 'DEAD'; const color = team === 'BLUE' ? 0x60a5fa : 0xf87171; const radius = cellSize * 0.4;
+    
+    const draw = (g: any) => {
+      g.clear(); 
+      if (isDead) { g.beginFill(0x1e293b); g.drawCircle(0, 0, radius); g.endFill(); return; }
+      
+      // 视野范围 (淡色)
+      g.beginFill(color, 0.05); g.drawCircle(0, 0, radius * 8); g.endFill();
+      
+      // 实体
+      g.lineStyle(1, 0xffffff, 0.8); g.beginFill(color); g.drawCircle(0, 0, radius); g.endFill();
+      
+      // 职业标识
+      g.lineStyle(2, 0xffffff, 0.9);
+      if (role === 'SNIPER') { g.drawCircle(0, 0, radius * 0.5); g.moveTo(-radius, 0); g.lineTo(radius, 0); g.moveTo(0, -radius); g.lineTo(0, radius); } 
+      else if (role === 'MEDIC') { g.moveTo(0, -radius*0.6); g.lineTo(0, radius*0.6); g.moveTo(-radius*0.6, 0); g.lineTo(radius*0.6, 0); } 
+      else if (role === 'LEADER') { g.drawPolygon([-radius*0.4, 0, 0, -radius*0.8, radius*0.4, 0, 0, radius*0.8]); }
+
+      // 血条
+      const hpW = cellSize; const hpH = cellSize * 0.15; const hpY = -radius - hpH - 2;
+      g.beginFill(0x000000); g.drawRect(-hpW/2, hpY, hpW, hpH); g.endFill();
+      const hpPercent = Math.max(0, hp / maxHp); g.beginFill(hpPercent > 0.5 ? 0x22c55e : 0xff0000); g.drawRect(-hpW/2, hpY, hpW * hpPercent, hpH); g.endFill();
+
+      // 🎯 被发现标记 (Spotted Icon)
+      if (isSpotted) {
+        g.lineStyle(2, 0xff0000, 1);
+        const sy = -radius - 15;
+        // 画个简单的瞄准框
+        g.moveTo(-5, sy-5); g.lineTo(5, sy+5);
+        g.moveTo(5, sy-5); g.lineTo(-5, sy+5);
+      }
+    };
+    return <Container x={x * cellSize} y={y * cellSize}><Graphics draw={draw} /></Container>;
+};
+
 const SpeechBubble = ({ x, y, text, team, cellSize }: any) => {
   const [opacity, setOpacity] = useState(1);
   useEffect(() => { const timer = setTimeout(() => setOpacity(0), 2000); return () => clearTimeout(timer); }, []);
@@ -98,7 +99,7 @@ const SpeechBubble = ({ x, y, text, team, cellSize }: any) => {
   return <Container x={x * cellSize - 40} y={y * cellSize - cellSize * 2} alpha={opacity}><Graphics draw={draw} /><Text text={text} anchor={0.5} x={40} y={10} style={new TextStyle({ fontSize: 10, fill: '#ffffff', fontFamily: 'Arial', align: 'center' })} /></Container>;
 };
 
-export default function TacticalViewport({ units, attacks, obstacles, floatingTexts, thoughts, moveLines, mapSize = 35 }: any) {
+export default function TacticalViewport({ units, attacks, obstacles, floatingTexts, thoughts, moveLines, spottedUnits, mapSize = 35 }: any) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const cellSize = 800 / mapSize; 
@@ -110,9 +111,16 @@ export default function TacticalViewport({ units, attacks, obstacles, floatingTe
       <ObstaclesLayer data={obstacles} cellSize={cellSize} />
       <Container sortableChildren={true}>
         <MoveLines lines={moveLines} cellSize={cellSize} />
-        {units.map((u: any) => <Unit key={u.id} {...u} cellSize={cellSize} zIndex={10} />)}
+        {units.map((u: any) => (
+          <Unit 
+            key={u.id} 
+            {...u} 
+            cellSize={cellSize} 
+            zIndex={10} 
+            isSpotted={spottedUnits.has(u.id)} // 传入是否被发现
+          />
+        ))}
         <LaserEffects attacks={attacks} cellSize={cellSize} />
-        {/* 渲染飘字，传入 life */}
         {floatingTexts.map((ft: any) => <FloatingText key={ft.id} {...ft} cellSize={cellSize} />)}
         {thoughts && thoughts.map((t: any) => <SpeechBubble key={t.id} {...t} cellSize={cellSize} />)}
       </Container>
