@@ -1,35 +1,43 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-// ⬇️ 修复：包含所有需要的图标
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, ShieldAlert, Crosshair, Trophy, Flame, Users } from 'lucide-react';
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Shield, Crosshair, Trophy, Skull, Users, HeartPulse } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
 const BASE_SPEED = 0.008; 
 const MAP_SIZE = 30;
 
-// === ⚔️ 武器参数 ===
+// === ⚔️ 扩充武器库 ===
 const WEAPON_STATS: any = {
   SNIPER:  { range: 30, damage: 120, cooldown: 3500, accuracy: 0.95, suppression: 80 }, 
   ASSAULT: { range: 10, damage: 20,  cooldown: 500,  accuracy: 0.75, suppression: 15 }, 
   LEADER:  { range: 15, damage: 35,  cooldown: 1000, accuracy: 0.85, suppression: 30 },
   MEDIC:   { range: 8,  damage: 15,  cooldown: 800,  accuracy: 0.70, suppression: 10 },
+  HEAVY:   { range: 18, damage: 25,  cooldown: 300,  accuracy: 0.50, suppression: 60 }, // 新职业：机枪手，射速极快，压制力强，精度低
 };
 
+// 障碍物 (稍微调整以适应 10 人乱战)
 const OBSTACLES = [
   { x: 14, y: 10, w: 2, h: 10 }, { x: 10, y: 14, w: 10, h: 2 },
-  { x: 5, y: 5, w: 5, h: 5 }, { x: 20, y: 20, w: 5, h: 5 },
-  { x: 2, y: 15, w: 4, h: 1 }, { x: 24, y: 15, w: 4, h: 1 },
+  { x: 5, y: 5, w: 6, h: 6 },    { x: 19, y: 19, w: 6, h: 6 },
+  { x: 2, y: 18, w: 5, h: 1 },   { x: 23, y: 11, w: 5, h: 1 },
 ];
 
+// === 👥 扩编至 5v5 ===
 const INITIAL_UNITS = [
+  // BLUE
   { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
   { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
-  { id: 'b3', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  { id: 'b3', team: 'BLUE', role: 'MEDIC', x: 3, y: 4, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  { id: 'b4', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  { id: 'b5', team: 'BLUE', role: 'HEAVY', x: 5, y: 10, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  // RED
   { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
   { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
-  { id: 'r3', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  { id: 'r3', team: 'RED', role: 'MEDIC', x: 26, y: 26, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  { id: 'r4', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
+  { id: 'r5', team: 'RED', role: 'HEAVY', x: 24, y: 20, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0 },
 ];
 
 export default function Home() {
@@ -41,7 +49,6 @@ export default function Home() {
   const [moveLines, setMoveLines] = useState<any[]>([]);
   const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
   const [spottedUnits, setSpottedUnits] = useState<Set<string>>(new Set());
-  const [logs, setLogs] = useState<any[]>([]); // 补回 logs
   
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
   const unitsRef = useRef(units); 
@@ -50,12 +57,15 @@ export default function Home() {
   useEffect(() => { unitsRef.current = units; }, [units]);
   useEffect(() => { units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y }); }, []);
 
+  // 物理检测函数
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
-    const rx = rect.x + 0.1; const ry = rect.y + 0.1; const rw = rect.w - 0.2; const rh = rect.h - 0.2;
+    // 更加严格的判定，防止擦边穿墙
+    const rx = rect.x + 0.05; const ry = rect.y + 0.05; 
+    const rw = rect.w - 0.1; const rh = rect.h - 0.1;
     const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
     const minY = Math.min(p1.y, p2.y); const maxY = Math.max(p1.y, p2.y);
     if (rx > maxX || rx + rw < minX || ry > maxY || ry + rh < minY) return false;
-    const steps = 8;
+    const steps = 15; // 增加采样点，确保不穿墙
     for (let i = 0; i <= steps; i++) {
       const t = i / steps; const px = p1.x + (p2.x - p1.x) * t; const py = p1.y + (p2.y - p1.y) * t;
       if (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh) return true;
@@ -71,7 +81,7 @@ export default function Home() {
     return false;
   };
 
-  // === ⚡️ 战斗反射循环 (加入压制机制) ===
+  // === ⚡️ 战斗反射循环 (严禁穿墙) ===
   useEffect(() => {
     if (!isPlaying) return;
 
@@ -88,7 +98,6 @@ export default function Home() {
       nextUnits.forEach(attacker => {
         if (attacker.status === 'DEAD') return;
         
-        // 压制惩罚：射速变慢
         const isSuppressed = (attacker.suppression || 0) > 50;
         const stats = WEAPON_STATS[attacker.role] || WEAPON_STATS['ASSAULT'];
         const effectiveCooldown = isSuppressed ? stats.cooldown * 1.5 : stats.cooldown;
@@ -100,16 +109,16 @@ export default function Home() {
           if (target.team === attacker.team || target.status === 'DEAD') return;
           const dist = Math.sqrt(Math.pow(attacker.x - target.x, 2) + Math.pow(attacker.y - target.y, 2));
           
+          // 只有完全无遮挡才算“发现”和“可射击”
+          // 移除了 dist < 4 的近战透视外挂
           if (dist < 35 && checkLineOfSight(attacker, target)) {
              currentlySpotted.add(target.id);
-          }
-
-          if (now - (attacker.lastShot || 0) >= effectiveCooldown) {
-            if (dist <= stats.range) {
-              if (dist < 4 || checkLineOfSight(attacker, target)) {
-                if (dist < minDist) { minDist = dist; bestTarget = target; }
-              }
-            }
+             
+             if (now - (attacker.lastShot || 0) >= effectiveCooldown) {
+               if (dist <= stats.range) {
+                 if (dist < minDist) { minDist = dist; bestTarget = target; }
+               }
+             }
           }
         });
 
@@ -117,7 +126,6 @@ export default function Home() {
           attacker.lastShot = now;
           hasUpdates = true;
           
-          // 压制惩罚：命中率减半
           const accuracy = isSuppressed ? stats.accuracy * 0.5 : stats.accuracy;
           const isHit = Math.random() < accuracy;
           
@@ -144,16 +152,11 @@ export default function Home() {
                newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: `-${dmg}`, color: "#fff", life: 60, id: Math.random() });
             }
           } else {
-            if (isSuppressed) {
-               newTexts.push({ x: attacker.x, y: attacker.y, text: "PINNED!", color: "#f59e0b", life: 40, id: Math.random() });
-            } else {
-               newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: "SUPPRESSED", color: "#888", life: 40, id: Math.random() });
-            }
+            if (isSuppressed) newTexts.push({ x: attacker.x, y: attacker.y, text: "PINNED!", color: "#f59e0b", life: 40, id: Math.random() });
           }
         }
       });
 
-      // 压制值恢复
       nextUnits.forEach(u => {
         if (u.suppression > 0) u.suppression = Math.max(0, u.suppression - 2); 
       });
@@ -171,34 +174,19 @@ export default function Home() {
     return () => clearInterval(reflexInterval);
   }, [isPlaying]);
 
-  // AI 循环
+  // AI 循环 (保持不变)
   const runAiLoop = async () => {
     if (!isPlaying) return;
     setNetStatus('SENDING');
     try {
-      const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => {
-        const visibleEnemies = units
-          .filter(other => other.team !== u.team && other.status === 'ALIVE')
-          .filter(other => {
-             const dist = Math.sqrt(Math.pow(u.x - other.x, 2) + Math.pow(u.y - other.y, 2));
-             if (dist < 8) return true;
-             return dist < 35 && checkLineOfSight(u, other);
-          })
-          .map(other => ({ id: other.id, pos: {x: other.x, y: other.y}, hp: other.hp, role: other.role }));
-        return { 
-          id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp, 
-          suppression: u.suppression, 
-          visibleEnemies 
-        };
-      });
-
+      const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => ({
+          id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp, suppression: u.suppression
+      }));
       const res = await fetch('/api/game-tick', {
         method: 'POST',
         body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES, mapSize: MAP_SIZE })
       });
-      
       if (res.status === 429) { setNetStatus('COOLING'); timerRef.current = setTimeout(runAiLoop, 10000); return; }
-      
       if (res.ok) {
         setNetStatus('IDLE');
         const data = await res.json();
@@ -240,7 +228,6 @@ export default function Home() {
         const dx = target.x - u.x; const dy = target.y - u.y;
         if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return { ...u, x: target.x, y: target.y };
         
-        // 压制惩罚：移动速度减半
         const isSuppressed = (u.suppression || 0) > 50;
         const speed = isSuppressed ? BASE_SPEED * 0.5 : BASE_SPEED;
 
@@ -257,76 +244,96 @@ export default function Home() {
     return () => cancelAnimationFrame(frame);
   }, [isPlaying]);
 
+  // === 🖥️ 布局重构 ===
   return (
-    <main className="h-screen w-full bg-[#020617] text-slate-300 font-sans flex overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-14 bg-[#0f172a] border-b border-slate-800 z-20 flex items-center justify-between px-6">
-        <h1 className="text-lg font-bold text-white flex items-center gap-2">
-          <ShieldAlert className="text-emerald-500" />
-          MARINE TACTICS <span className="text-[10px] bg-emerald-900 px-2 rounded">SUPPRESSION ENGINE</span>
-          {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI COMMANDING</span>}
-        </h1>
-        <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
-          {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START MISSION"}
-        </button>
-      </div>
+    <main className="flex h-screen w-full bg-[#020617] text-slate-300 font-sans overflow-hidden">
+      
+      {/* === 左侧：游戏视口 === */}
+      <div className="flex-1 relative flex flex-col">
+        {/* 顶部工具栏 */}
+        <div className="h-14 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-6 z-20">
+          <h1 className="text-lg font-bold text-white flex items-center gap-2">
+            <Shield className="text-emerald-500" />
+            TACTICAL OPS <span className="text-[10px] bg-emerald-900 px-2 rounded">5v5 SQUAD</span>
+            {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI</span>}
+          </h1>
+          <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
+            {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START"}
+          </button>
+        </div>
 
-      <div className="flex-1 flex items-center justify-center bg-[#020617] pt-14 pb-32">
-        <div className="border border-slate-800 shadow-2xl relative">
-           <TacticalViewport 
-             units={units} attacks={attacks} obstacles={OBSTACLES} 
-             floatingTexts={floatingTexts} thoughts={thoughts} 
-             moveLines={moveLines} spottedUnits={spottedUnits} 
-             mapSize={MAP_SIZE} 
-           />
+        {/* 游戏画布 */}
+        <div className="flex-1 bg-[#020617] relative flex items-center justify-center p-4">
+           <div className="border border-slate-800 shadow-2xl relative">
+             <TacticalViewport 
+               units={units} attacks={attacks} obstacles={OBSTACLES} 
+               floatingTexts={floatingTexts} thoughts={thoughts} 
+               moveLines={moveLines} spottedUnits={spottedUnits} 
+               mapSize={MAP_SIZE} 
+             />
+           </div>
         </div>
       </div>
 
-      <div className="absolute bottom-0 left-0 w-full h-32 bg-[#0f172a]/95 border-t border-slate-800 flex divide-x divide-slate-800 z-30">
-        {/* 数据面板 */}
-        <div className="flex-1 p-4 flex flex-col gap-2">
-           <div className="flex justify-between items-center text-blue-400 font-bold mb-1 border-b border-blue-900/50 pb-1">
-             <span>BLUE TEAM</span>
-             <span className="text-xs text-blue-600">ALPHA SQUAD</span>
+      {/* === 右侧：战术数据面板 (Sidebar) === */}
+      <div className="w-80 bg-[#0f172a] border-l border-slate-800 flex flex-col z-30">
+        
+        {/* 蓝队列表 */}
+        <div className="flex-1 p-4 border-b border-slate-800 overflow-y-auto">
+           <div className="flex justify-between items-center text-blue-400 font-bold mb-3 pb-1 border-b border-blue-900/50">
+             <span className="flex items-center gap-2"><Users size={16}/> BLUE TEAM</span>
+             <span className="text-xs text-blue-600">ALPHA</span>
            </div>
-           <div className="grid grid-cols-3 gap-2">
+           <div className="space-y-3">
              {units.filter(u => u.team === 'BLUE').map(u => (
-               <div key={u.id} className={`bg-slate-900 p-2 rounded border ${u.status==='DEAD' ? 'border-red-900 opacity-50' : 'border-slate-700'}`}>
-                 <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                   <span>{u.role}</span>
-                   <span className="text-amber-400 flex items-center gap-1"><Trophy size={8}/> {u.kills}</span>
+               <div key={u.id} className={`bg-slate-900 p-2.5 rounded border relative ${u.status==='DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-slate-700'}`}>
+                 <div className="flex justify-between text-xs text-slate-300 mb-1 font-bold">
+                   <span>{u.role} <span className="text-slate-500 text-[10px]">#{u.id}</span></span>
+                   <span className="text-amber-400 flex items-center gap-1"><Trophy size={10}/> {u.kills}</span>
                  </div>
-                 <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
-                   <div className="h-full bg-blue-500" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
+                 {/* HP Bar */}
+                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
+                   <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
                  </div>
-                 <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                 {/* Suppression Bar */}
+                 <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden flex justify-between items-center">
                     <div className="h-full bg-yellow-500 transition-all" style={{ width: `${u.suppression}%` }}/>
                  </div>
+                 {u.hp < 350 && u.status !== 'DEAD' && (
+                   <div className="absolute right-2 top-8 text-red-500 animate-pulse"><HeartPulse size={14}/></div>
+                 )}
                </div>
              ))}
            </div>
         </div>
-        <div className="flex-1 p-4 flex flex-col gap-2">
-           <div className="flex justify-between items-center text-red-400 font-bold mb-1 border-b border-red-900/50 pb-1">
-             <span>RED TEAM</span>
-             <span className="text-xs text-red-600">BRAVO SQUAD</span>
+
+        {/* 红队列表 */}
+        <div className="flex-1 p-4 overflow-y-auto">
+           <div className="flex justify-between items-center text-red-400 font-bold mb-3 pb-1 border-b border-red-900/50">
+             <span className="flex items-center gap-2"><Users size={16}/> RED TEAM</span>
+             <span className="text-xs text-red-600">BRAVO</span>
            </div>
-           <div className="grid grid-cols-3 gap-2">
+           <div className="space-y-3">
              {units.filter(u => u.team === 'RED').map(u => (
-               <div key={u.id} className={`bg-slate-900 p-2 rounded border ${u.status==='DEAD' ? 'border-red-900 opacity-50' : 'border-slate-700'}`}>
-                 <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                   <span>{u.role}</span>
-                   <span className="text-amber-400 flex items-center gap-1"><Trophy size={8}/> {u.kills}</span>
+               <div key={u.id} className={`bg-slate-900 p-2.5 rounded border relative ${u.status==='DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-slate-700'}`}>
+                 <div className="flex justify-between text-xs text-slate-300 mb-1 font-bold">
+                   <span>{u.role} <span className="text-slate-500 text-[10px]">#{u.id}</span></span>
+                   <span className="text-amber-400 flex items-center gap-1"><Trophy size={10}/> {u.kills}</span>
                  </div>
-                 <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
-                   <div className="h-full bg-red-500" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
+                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
+                   <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
                  </div>
                  <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                     <div className="h-full bg-yellow-500 transition-all" style={{ width: `${u.suppression}%` }}/>
                  </div>
+                 {u.hp < 350 && u.status !== 'DEAD' && (
+                   <div className="absolute right-2 top-8 text-red-500 animate-pulse"><HeartPulse size={14}/></div>
+                 )}
                </div>
              ))}
            </div>
         </div>
+
       </div>
     </main>
   );
