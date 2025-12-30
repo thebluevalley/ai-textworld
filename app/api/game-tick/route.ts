@@ -2,46 +2,45 @@ import { NextResponse } from 'next/server';
 import { AIDispatcher } from '@/utils/ai-dispatcher';
 
 export async function POST(req: Request) {
-  const { units, obstacles } = await req.json();
+  const { units, obstacles, mapSize } = await req.json();
 
-  const systemPrompt = `You are a CQB Tactical AI.
-  Map: 20x20 Grid. Complex Obstacles present.
+  const systemPrompt = `You are a Grand Strategy AI.
+  Map Size: ${mapSize}x${mapSize} Grid (Large Scale).
   
-  PHYSICS RULES:
-  1. NO WALL-HACKS: You cannot shoot through walls.
-  2. LINE OF SIGHT (LoS): You can only attack enemies listed in 'visibleEnemies'.
-  3. COLLISION: Do not walk into walls. Use waypoints to go AROUND obstacles.
+  ENVIRONMENT:
+  - Large open areas with scattered urban ruins (obstacles).
+  - Teams start FAR apart (Corner vs Corner).
   
   TACTICS:
-  - If no enemies visible: MOVE to corners or gaps to gain LoS (Search).
-  - If enemy visible but far: MOVE closer to ensure hit.
-  - If low HP: HIDE behind cover (break LoS).
+  1. LONG MARCH: Enemies are far. Move "ASSAULT" and "LEADER" units towards the center (25,25) or enemy ping to close distance.
+  2. SNIPER OVERWATCH: Snipers have Range 35. Position them in high visibility lanes.
+  3. FLANKING: Use the large map width to flank. Don't just rush middle.
   
-  DATA FORMAT:
-  - "visibleEnemies": List of targets currently seen by the unit.
+  PHYSICS:
+  - You cannot shoot through buildings (Obstacles).
+  - Use 'visibleEnemies' list to verify targets.
   
   Output Example:
   {
     "actions": [
-      { "unitId": "b1", "type": "MOVE", "target": { "x": 10, "y": 5 }, "thought": "Rounding corner" },
-      { "unitId": "b2", "type": "ATTACK", "targetUnitId": "r1", "damage": 25, "thought": "Visual confirmed" }
+      { "unitId": "b1", "type": "MOVE", "target": { "x": 20, "y": 20 }, "thought": "Advancing to center" },
+      { "unitId": "r2", "type": "ATTACK", "targetUnitId": "b1", "damage": 40, "thought": "Long range snipe" }
     ]
   }
   `;
 
-  // 精简数据，重点是 visibleEnemies
   const promptData = units.map((u: any) => ({
     id: u.id,
     team: u.team,
-    pos: u.pos, // 前端已经把 x,y 包装好了
+    pos: u.pos, 
     hp: u.hp,
     role: u.role,
-    visibleEnemies: u.visibleEnemies || [] // 关键数据
+    visibleEnemies: u.visibleEnemies || [] 
   }));
 
   const userPrompt = JSON.stringify({
     squad_status: promptData,
-    map_obstacles: obstacles // 还是传给 AI，让它大致知道哪有墙
+    map_obstacles: obstacles
   });
 
   const result = await AIDispatcher.chatCompletion({
