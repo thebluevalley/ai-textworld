@@ -8,7 +8,7 @@ const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), 
 const BASE_SPEED = 0.008; 
 const MAP_SIZE = 30;
 
-// === ⚔️ 基础武器参数 ===
+// === ⚔️ 武器参数 ===
 const WEAPON_STATS: any = {
   SNIPER:  { range: 30, damage: 120, cooldown: 3500, accuracy: 0.95, suppression: 80 }, 
   ASSAULT: { range: 10, damage: 20,  cooldown: 500,  accuracy: 0.75, suppression: 15 }, 
@@ -23,19 +23,20 @@ const OBSTACLES = [
   { x: 2, y: 18, w: 5, h: 1 },   { x: 23, y: 11, w: 5, h: 1 },
 ];
 
+// 增加 lastMoveTime 字段用于检测发呆
 const INITIAL_UNITS = [
-  // BLUE (Alpha & Bravo mixed)
-  { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'b3', team: 'BLUE', role: 'MEDIC', x: 3, y: 4, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'b4', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'b5', team: 'BLUE', role: 'HEAVY', x: 5, y: 10, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
+  // BLUE
+  { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'b3', team: 'BLUE', role: 'MEDIC', x: 3, y: 4, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'b4', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'b5', team: 'BLUE', role: 'HEAVY', x: 5, y: 10, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
   // RED
-  { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'r3', team: 'RED', role: 'MEDIC', x: 26, y: 26, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'r4', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
-  { id: 'r5', team: 'RED', role: 'HEAVY', x: 24, y: 20, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'COVER_FIRE' },
+  { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'r3', team: 'RED', role: 'MEDIC', x: 26, y: 26, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'r4', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
+  { id: 'r5', team: 'RED', role: 'HEAVY', x: 24, y: 20, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
 ];
 
 export default function Home() {
@@ -77,7 +78,7 @@ export default function Home() {
     return false;
   };
 
-  // === ⚡️ 智能战术执行 (Reflex with Doctrine) ===
+  // === ⚡️ 战斗反射循环 (智能版) ===
   useEffect(() => {
     if (!isPlaying) return;
 
@@ -93,31 +94,22 @@ export default function Home() {
       nextUnits.forEach(attacker => {
         if (attacker.status === 'DEAD') return;
         
-        // === 战术参数修正 ===
+        // 自动重置发呆的 SUPPRESS 状态
+        // 如果当前是 SUPPRESS 但周围没有可见敌人，强制切回 MOVE
+        let canSeeAnyone = false;
+
         const baseStats = WEAPON_STATS[attacker.role] || WEAPON_STATS['ASSAULT'];
         let currentCooldown = baseStats.cooldown;
         let currentAccuracy = baseStats.accuracy;
         let suppressionPower = baseStats.suppression;
 
-        // 根据 AI 下达的 Tactic 调整参数
-        if (attacker.tactic === 'RUSH') {
-           // RUSH 模式：全速移动，禁止射击
-           return; 
-        } else if (attacker.tactic === 'SUPPRESS') {
-           // 压制模式：射速极快，精度降低，压制力提升
-           currentCooldown = currentCooldown * 0.4;
-           currentAccuracy = currentAccuracy * 0.4; 
-           suppressionPower = suppressionPower * 1.5;
+        if (attacker.tactic === 'RUSH') return; // RUSH 不开火
+        if (attacker.tactic === 'SUPPRESS') {
+           currentCooldown *= 0.4; currentAccuracy *= 0.4; suppressionPower *= 1.5;
         }
-
-        // 被压制惩罚
         const isSuppressed = (attacker.suppression || 0) > 50;
-        if (isSuppressed) {
-           currentCooldown *= 1.5;
-           currentAccuracy *= 0.5;
-        }
+        if (isSuppressed) { currentCooldown *= 1.5; currentAccuracy *= 0.5; }
 
-        // 索敌与开火
         let bestTarget: any = null;
         let minDist = Infinity;
 
@@ -127,6 +119,7 @@ export default function Home() {
           
           if (dist < 35 && checkLineOfSight(attacker, target)) {
              currentlySpotted.add(target.id);
+             canSeeAnyone = true;
              
              if (now - (attacker.lastShot || 0) >= currentCooldown) {
                if (dist <= baseStats.range) {
@@ -135,6 +128,13 @@ export default function Home() {
              }
           }
         });
+
+        // ⚡️ 唤醒机制：如果我在压制但没人可打，自动切换回移动模式
+        if (attacker.tactic === 'SUPPRESS' && !canSeeAnyone) {
+           attacker.tactic = 'MOVE';
+           // 稍微给个移动目标，防止一直卡原地
+           // 这只是前端修正，真正的路径还是等 AI 下一轮发
+        }
 
         if (bestTarget) {
           attacker.lastShot = now;
@@ -147,15 +147,14 @@ export default function Home() {
             color: attacker.team === 'BLUE' ? 0x60a5fa : 0xf87171,
             isMiss: !isHit,
             timestamp: now,
-            isSuppressionFire: isSuppressed || attacker.tactic === 'SUPPRESS' // 特效标识
+            isSuppressionFire: isSuppressed || attacker.tactic === 'SUPPRESS' 
           });
 
-          // 压制值计算
           bestTarget.suppression = Math.min(100, (bestTarget.suppression || 0) + suppressionPower);
 
           if (isHit) {
             let dmg = baseStats.damage;
-            if (Math.random() > 0.9) dmg = Math.floor(dmg * 2.0); // 暴击
+            if (Math.random() > 0.9) dmg = Math.floor(dmg * 2.0); 
             bestTarget.hp = Math.max(0, bestTarget.hp - dmg);
             if (bestTarget.hp === 0 && bestTarget.status !== 'DEAD') {
                bestTarget.status = 'DEAD';
@@ -165,9 +164,8 @@ export default function Home() {
                newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: `-${dmg}`, color: "#fff", life: 60, id: Math.random() });
             }
           } else {
-            // 如果是压制射击，即使 Miss 也会显示 Suppressing
-            if (attacker.tactic === 'SUPPRESS') {
-                if (Math.random() > 0.7) newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: "SUPPRESSED", color: "#fbbf24", life: 40, id: Math.random() });
+            if (attacker.tactic === 'SUPPRESS' && Math.random()>0.7) {
+                newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: "SUPPRESSED", color: "#fbbf24", life: 40, id: Math.random() });
             }
           }
         }
@@ -182,7 +180,7 @@ export default function Home() {
       if (hasUpdates || nextUnits.some(u => u.suppression > 0)) {
         setUnits(nextUnits);
       }
-      if (newAttacks.length > 0) setAttacks(prev => [...newAttacks, ...prev].slice(0, 30)); // 增加特效数量
+      if (newAttacks.length > 0) setAttacks(prev => [...newAttacks, ...prev].slice(0, 30));
       if (newTexts.length > 0) setFloatingTexts(prev => [...prev, ...newTexts]);
 
     }, 200);
@@ -190,14 +188,18 @@ export default function Home() {
     return () => clearInterval(reflexInterval);
   }, [isPlaying]);
 
-  // === AI 循环 ===
+  // === AI 循环 (防发呆) ===
   const runAiLoop = async () => {
     if (!isPlaying) return;
     setNetStatus('SENDING');
+    
+    // 强制唤醒：如果 units 长时间未动，给一个随机偏移
+    const now = Date.now();
+    const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => ({
+        id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp, suppression: u.suppression
+    }));
+
     try {
-      const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => ({
-          id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp, suppression: u.suppression
-      }));
       const res = await fetch('/api/game-tick', {
         method: 'POST',
         body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES, mapSize: MAP_SIZE })
@@ -209,14 +211,13 @@ export default function Home() {
         if (data.actions) {
           const newThoughts: any[] = [];
           const newMoveLines: any[] = [];
+          
           data.actions.forEach((a: any) => {
             const actor = units.find(u => u.id === a.unitId);
             if (!actor || actor.status === 'DEAD') return;
             
-            // 更新单位的战术状态
-            if (a.tactic) {
-               setUnits(prev => prev.map(u => u.id === a.unitId ? { ...u, tactic: a.tactic } : u));
-            }
+            // 更新最后行动时间
+            setUnits(prev => prev.map(u => u.id === a.unitId ? { ...u, tactic: a.tactic, lastMoveTime: now } : u));
 
             if (a.thought) newThoughts.push({ x: actor.x, y: actor.y, text: a.thought, team: actor.team, id: Math.random() });
             
@@ -247,15 +248,28 @@ export default function Home() {
       setUnits(prev => prev.map(u => {
         if (u.status === 'DEAD') return u;
         const target = targetsRef.current[u.id];
-        if (!target) return u;
-        const dx = target.x - u.x; const dy = target.y - u.y;
-        if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return { ...u, x: target.x, y: target.y };
         
-        // 速度受压制影响，也受战术模式影响 (RUSH = 快, SUPPRESS = 0)
+        // ⚡️ 物理唤醒：如果没目标，往地图中心稍微走一点 (Gravity Pull)
+        // 这能解决“出生点发呆”问题
+        let tx = target ? target.x : MAP_SIZE/2;
+        let ty = target ? target.y : MAP_SIZE/2;
+        if (!target) {
+           // 只有当没有任何指令时才受微弱引力影响
+           const distToCenter = Math.sqrt(Math.pow(u.x - 15, 2) + Math.pow(u.y - 15, 2));
+           if (distToCenter > 10) { tx = 15; ty = 15; } else { tx = u.x; ty = u.y; }
+        } else {
+           tx = target.x; ty = target.y;
+        }
+
+        const dx = tx - u.x; const dy = ty - u.y;
+        if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return { ...u, x: tx, y: ty };
+        
         let speed = BASE_SPEED;
         if (u.tactic === 'RUSH') speed *= 1.8;
-        if (u.tactic === 'SUPPRESS') speed = 0; // 压制时必须站桩
+        if (u.tactic === 'SUPPRESS') speed = 0; 
         if ((u.suppression || 0) > 50) speed *= 0.5;
+        // 如果没有收到 AI 指令 (target为空)，速度极慢，只是为了不发呆
+        if (!target) speed *= 0.1;
 
         let newX = u.x + dx * speed; let newY = u.y + dy * speed;
         if (isColliding(newX, newY)) {
@@ -276,7 +290,7 @@ export default function Home() {
         <div className="h-14 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-6 z-20">
           <h1 className="text-lg font-bold text-white flex items-center gap-2">
             <Shield className="text-emerald-500" />
-            TACTICAL OPS <span className="text-[10px] bg-emerald-900 px-2 rounded">ADVANCED DOCTRINE</span>
+            TACTICAL OPS <span className="text-[10px] bg-emerald-900 px-2 rounded">5v5 SQUAD</span>
             {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI COMMANDING</span>}
           </h1>
           <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
@@ -291,6 +305,7 @@ export default function Home() {
       </div>
 
       <div className="w-80 bg-[#0f172a] border-l border-slate-800 flex flex-col z-30">
+        {/* Blue Team */}
         <div className="flex-1 p-4 border-b border-slate-800 overflow-y-auto">
            <div className="flex justify-between items-center text-blue-400 font-bold mb-3 pb-1 border-b border-blue-900/50">
              <span className="flex items-center gap-2"><Users size={16}/> BLUE TEAM</span>
@@ -317,6 +332,7 @@ export default function Home() {
              ))}
            </div>
         </div>
+        {/* Red Team */}
         <div className="flex-1 p-4 overflow-y-auto">
            <div className="flex justify-between items-center text-red-400 font-bold mb-3 pb-1 border-b border-red-900/50">
              <span className="flex items-center gap-2"><Users size={16}/> RED TEAM</span>
