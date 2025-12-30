@@ -4,41 +4,59 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 export async function POST(req: Request) {
   const { units, obstacles, mapSize } = await req.json();
 
-  const systemPrompt = `You are a PRO GAMER AI playing a deathmatch.
-  Map: ${mapSize}x${mapSize}.
+  const systemPrompt = `You are an ELITE TACTICAL AI. Map: ${mapSize}x${mapSize}.
   
-  OBJECTIVE: ELIMINATE ENEMY TEAM.
+  CORE DOCTRINE: "SURVIVE AND ELIMINATE"
   
-  STRATEGY RULES (HUMAN-LIKE BEHAVIOR):
-  1. 🔫 IF ENEMY VISIBLE: SHOOT! Do not move. Shooting is free. Moving risks exposure.
-  2. 🛡️ IF UNDER FIRE: Move to nearest OBSTACLE (Wall) for cover.
-  3. 🏃 IF NO ENEMY: 
-     - ASSAULT: Rush to map center (15,15).
-     - SNIPER: Move to corners or long hallways.
-     - LEADER: Flank around the edges.
+  1. 🛡️ SELF-PRESERVATION (HIGHEST PRIORITY):
+     - If HP < 500: DO NOT stand in the open. MOVE behind nearest Obstacle.
+     - If HP is low, RETREAT away from enemies.
   
-  CRITICAL:
-  - You control BOTH Blue and Red teams.
-  - RED TEAM MUST BE AGGRESSIVE.
-  - Output coordinates must be Integers.
+  2. 🔫 COMBAT LOGIC:
+     - If enemy is visible AND you have high HP (>500): ATTACK.
+     - If enemy is visible BUT you have low HP: ATTACK then RETREAT (if possible) or just HIDE.
+     - Do NOT just stand still and trade shots if you are losing.
   
-  Format:
-  { "actions": [{ "unitId": "b1", "type": "ATTACK", "targetUnitId": "r1", "damage": 50, "thought": "Gotcha!" }] }
+  3. 🏃 MANEUVERING:
+     - SNIPER: Keep range > 10. Move to corners.
+     - ASSAULT: Flank enemies behind cover. Don't charge in a straight line if they are watching.
+     - MEDIC: Hide. Only move to heal.
+
+  DATA PROVIDED:
+  - "visibleEnemies": List of targets currently seen.
+  
+  Output Example:
+  {
+    "actions": [
+      { "unitId": "b1", "type": "MOVE", "target": {"x": 5, "y": 10}, "thought": "Taking Cover!" },
+      { "unitId": "r1", "type": "ATTACK", "targetUnitId": "b1", "damage": 45, "thought": "Suppressing Fire" }
+    ]
+  }
   `;
 
-  // 精简数据
+  // Pre-process data to give AI situational awareness
   const promptData = units.map((u: any) => ({
-    id: u.id, team: u.team, pos: u.pos, hp: u.hp, role: u.role,
-    // 只有当有敌人可见时才发 enemy 列表
-    visibleEnemies: u.visibleEnemies.map((e:any) => ({ id: e.id, hp: e.hp, pos: e.pos }))
+    id: u.id, 
+    team: u.team, 
+    pos: u.pos, 
+    hp: u.hp, 
+    role: u.role,
+    // Provide simplified enemy data
+    visibleEnemies: u.visibleEnemies.map((e:any) => ({ 
+      id: e.id, 
+      hp: e.hp, 
+      dist: Math.round(Math.sqrt(Math.pow(u.pos.x - e.pos.x, 2) + Math.pow(u.pos.y - e.pos.y, 2))) 
+    }))
   }));
 
-  // 把障碍物概略告诉 AI (只发前5个大的，省token)
-  const mainCover = obstacles.slice(0, 5).map((o:any) => ({ x: o.x, y: o.y }));
+  // Send simplified obstacle data (just centers) to save tokens but give spatial awareness
+  const simplifiedObstacles = obstacles.map((o:any) => ({ 
+    type: "COVER", x: o.x + o.w/2, y: o.y + o.h/2 
+  }));
 
   const userPrompt = JSON.stringify({
-    units_status: promptData,
-    cover_locations: mainCover
+    squad_status: promptData,
+    nearby_cover: simplifiedObstacles.slice(0, 6) // Give them a few cover options
   });
 
   const result = await AIDispatcher.chatCompletion({
