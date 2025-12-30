@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-// ⬇️ 修复：添加了 Trophy
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Cpu, Crosshair, Trophy, Skull } from 'lucide-react';
+// ⬇️ 修复：确保导入了 Users 和 Trophy，防止构建报错
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Cpu, Crosshair, Trophy, Skull, Users } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
@@ -72,7 +72,7 @@ export default function Home() {
     return false;
   };
 
-  // === ⚡️ 反射循环 ===
+  // === ⚡️ 反射循环 (包含击杀统计 & 视野标记) ===
   useEffect(() => {
     if (!isPlaying) return;
 
@@ -233,6 +233,7 @@ export default function Home() {
     <main className="h-screen w-full bg-[#020617] text-slate-300 font-sans flex overflow-hidden">
       <div className="absolute top-0 left-0 w-full h-14 bg-[#0f172a] border-b border-slate-800 z-20 flex items-center justify-between px-6">
         <h1 className="text-lg font-bold text-white flex items-center gap-2">
+          {/* 这里使用了 Users 图标 */}
           <Users className="text-indigo-500" />
           SQUAD TACTICS <span className="text-[10px] bg-indigo-900 px-2 rounded">HIVE MIND AI</span>
           {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> INTEL SHARING</span>}
