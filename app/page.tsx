@@ -1,44 +1,42 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, Radio, Activity } from 'lucide-react';
+import { Play, Pause, Radio, Activity, ShieldAlert } from 'lucide-react';
 
-// 动态导入 PixiJS 组件，禁用 SSR
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
-// 初始数据
 const INITIAL_UNITS = [
-  { id: 'u1', team: 'A', x: 5, y: 5, targetX: 5, targetY: 5, hp: 100, role: '猎手', color: 0x00ff00 },
-  { id: 'u2', team: 'B', x: 15, y: 15, targetX: 15, targetY: 15, hp: 100, role: '守卫', color: 0xff0000 },
+  { id: 'u1', team: 'A', x: 5, y: 5, targetX: 5, targetY: 5, hp: 100, role: 'SCOUT', color: 0x00ff00 },
+  { id: 'u2', team: 'B', x: 15, y: 15, targetX: 15, targetY: 15, hp: 100, role: 'GUARD', color: 0xff0000 },
 ];
 
-// === 核心配置区 ===
-const API_INTERVAL = 2000; // 2秒心跳 (利用多Key轮询实现高频)
-const MOVE_SPEED = 0.08;   // 移动平滑系数 (数值越大移动越快，0.08 适合 2秒的节奏)
+const API_INTERVAL = 2000; 
+const MOVE_SPEED = 0.08;   
+// 定义地图边界
+const MAP_SIZE = 20;
+const MAP_PADDING = 0.5; // 稍微留点边距，不要贴着墙走
 
 export default function Home() {
   const [units, setUnits] = useState(INITIAL_UNITS);
   const [isPlaying, setIsPlaying] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [aggression, setAggression] = useState(70);
-  const [aiStatus, setAiStatus] = useState<'IDLE' | 'THINKING' | 'EXECUTING'>('IDLE');
+  const [aiStatus, setAiStatus] = useState<'IDLE' | 'EXECUTING'>('IDLE');
   
-  // 使用 Ref 存储最新的目标点，供动画循环读取，避免闭包陷阱
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({
     'u1': { x: 5, y: 5 },
     'u2': { x: 15, y: 15 }
   });
 
-  // === 1. AI 大脑循环 (高频：2秒一次) ===
+  // === 辅助函数：确保坐标在地图内 ===
+  const clamp = (num: number, min: number, max: number) => Math.min(Math.max(num, min), max);
+
+  // === AI 循环 ===
   useEffect(() => {
     if (!isPlaying) return;
 
     const tick = async () => {
       try {
-        // 只有在发送请求的那一瞬间显示 THINKING，避免一直闪烁
-        // setAiStatus('THINKING'); 
-
-        // 构建请求数据：告诉 AI 单位的"目标位置"，而不是"当前动画位置"
         const currentTargets = units.map(u => ({
           ...u,
           x: targetsRef.current[u.id]?.x || u.x,
@@ -53,26 +51,29 @@ export default function Home() {
           })
         });
 
-        if (!res.ok) return; // 如果所有 Key 都在冷却，静默跳过
+        if (!res.ok) return; 
 
         const data = await res.json();
         
         if (data.actions && data.actions.length > 0) {
           setAiStatus('EXECUTING');
-          setTimeout(() => setAiStatus('IDLE'), 500); // 0.5秒后恢复空闲状态
+          setTimeout(() => setAiStatus('IDLE'), 500); 
 
-          // 更新日志 (只保留最近 10 条，防止高频刷新导致 DOM 压力)
           const newLogs = data.actions.map((a: any) => 
-            `[${new Date().toLocaleTimeString()}] ${a.unitId}: ${a.thought}`
+            `[${new Date().toLocaleTimeString().split(' ')[0]}] ${a.unitId}: ${a.thought}`
           );
-          setLogs(prev => [...newLogs, ...prev].slice(0, 10));
+          setLogs(prev => [...newLogs, ...prev].slice(0, 12));
 
-          // 更新目标点 Ref
+          // === 核心修复：边界检查 ===
           data.actions.forEach((action: any) => {
             if (action.type === 'MOVE' && action.target) {
+              // 强制将目标点限制在 [0.5, 19.5] 之间，确保单位永远在网格内
+              const safeX = clamp(action.target.x, MAP_PADDING, MAP_SIZE - MAP_PADDING);
+              const safeY = clamp(action.target.y, MAP_PADDING, MAP_SIZE - MAP_PADDING);
+
               targetsRef.current[action.unitId] = { 
-                x: action.target.x, 
-                y: action.target.y 
+                x: safeX, 
+                y: safeY
               };
             }
           });
@@ -82,17 +83,14 @@ export default function Home() {
       }
     };
 
-    // 立即执行一次
     tick();
-    // 开启循环
     const interval = setInterval(tick, API_INTERVAL); 
     return () => clearInterval(interval);
   }, [isPlaying, aggression]);
 
-  // === 2. 前端动画循环 (60 FPS) ===
+  // === 动画循环 ===
   useEffect(() => {
     let animationFrameId: number;
-
     const animate = () => {
       setUnits(prevUnits => {
         return prevUnits.map(u => {
@@ -102,12 +100,10 @@ export default function Home() {
           const dx = target.x - u.x;
           const dy = target.y - u.y;
           
-          // 如果距离极小，吸附
           if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) {
             return { ...u, x: target.x, y: target.y };
           }
 
-          // 线性插值移动
           return {
             ...u,
             x: u.x + dx * MOVE_SPEED,
@@ -115,66 +111,68 @@ export default function Home() {
           };
         });
       });
-
       animationFrameId = requestAnimationFrame(animate);
     };
 
     if (isPlaying) {
       animationFrameId = requestAnimationFrame(animate);
     }
-
     return () => cancelAnimationFrame(animationFrameId);
   }, [isPlaying]);
 
   return (
-    <main className="h-screen w-full bg-neutral-950 text-neutral-400 font-mono flex overflow-hidden">
+    // 修改背景色为深灰色 bg-[#141414]
+    <main className="h-screen w-full bg-[#141414] text-neutral-400 font-mono flex overflow-hidden select-none">
       
       {/* 左侧控制台 */}
-      <div className="w-72 flex flex-col border-r border-neutral-800 bg-black/50 p-4 gap-6 z-10 backdrop-blur-sm">
+      <div className="w-80 flex flex-col border-r border-neutral-800 bg-[#0a0a0a]/80 p-5 gap-6 z-10 backdrop-blur-md shadow-xl">
         <div>
-          <h1 className="text-xl text-white font-bold tracking-tighter">ECHO_CHAMBER</h1>
-          <div className="flex items-center justify-between mt-2">
-            <div className={`text-[10px] font-bold flex items-center gap-2 px-2 py-1 rounded transition-colors ${
-              aiStatus === 'EXECUTING' ? 'bg-emerald-900/50 text-emerald-500' : 'bg-neutral-800 text-neutral-500'
+          <h1 className="text-2xl text-white font-bold tracking-tighter flex items-center gap-2">
+            <ShieldAlert size={24} className="text-emerald-500"/>
+            ECHO_CHAMBER
+          </h1>
+          <div className="flex items-center justify-between mt-3 p-2 bg-neutral-900/50 rounded-md border border-neutral-800">
+            <div className={`text-[10px] font-bold flex items-center gap-2 transition-colors ${
+              aiStatus === 'EXECUTING' ? 'text-emerald-400' : 'text-neutral-500'
             }`}>
-              <Activity size={10} className={aiStatus === 'EXECUTING' ? 'animate-pulse' : ''}/>
-              {aiStatus === 'EXECUTING' ? 'AI ACTIVE' : 'STANDBY'}
+              <Activity size={14} className={aiStatus === 'EXECUTING' ? 'animate-pulse' : ''}/>
+              {aiStatus === 'EXECUTING' ? 'NEURAL NET ACTIVE' : 'STANDBY'}
             </div>
-            <div className="text-[10px] text-neutral-600">2s / TICK (FAST)</div>
+            <div className="text-[10px] font-medium text-neutral-500">tick_rate: 2000ms</div>
           </div>
         </div>
         
-        <div className="space-y-2">
-          <label className="text-xs font-bold text-neutral-500 flex justify-between">
-            <span>战术激进指数</span>
-            <span className="text-white">{aggression}%</span>
+        <div className="space-y-3 py-4 border-y border-neutral-800/50">
+          <label className="text-xs font-bold text-neutral-400 flex justify-between items-center">
+            <span>AGGRESSION BIAS</span>
+            <span className={`font-mono ${aggression > 80 ? 'text-red-500' : aggression > 50 ? 'text-amber-500' : 'text-emerald-500'}`}>{aggression}%</span>
           </label>
           <input 
             type="range" min="0" max="100" value={aggression} 
             onChange={(e) => setAggression(Number(e.target.value))}
-            className="w-full h-1 bg-neutral-800 appearance-none rounded cursor-pointer accent-emerald-500"
+            className="w-full h-2 bg-neutral-800 rounded-full appearance-none cursor-pointer accent-neutral-200 hover:accent-white transition-all"
           />
         </div>
 
         <button 
           onClick={() => setIsPlaying(!isPlaying)}
-          className={`w-full py-4 flex items-center justify-center gap-2 font-bold transition-all text-sm tracking-widest ${
+          className={`w-full py-4 flex items-center justify-center gap-3 font-bold transition-all text-sm tracking-[0.2em] rounded-sm ${
             isPlaying 
-              ? 'bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500/20' 
-              : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50 hover:bg-emerald-500/20'
+              ? 'bg-red-950/30 text-red-500 border border-red-900/50 hover:bg-red-900/40 hover:border-red-700' 
+              : 'bg-emerald-950/30 text-emerald-500 border border-emerald-900/50 hover:bg-emerald-900/40 hover:border-emerald-700'
           }`}
         >
-          {isPlaying ? <Pause size={16}/> : <Play size={16}/>}
-          {isPlaying ? "HALT SEQUENCE" : "INITIATE SIM"}
+          {isPlaying ? <Pause size={18}/> : <Play size={18}/>}
+          {isPlaying ? "HALT SIMULATION" : "INITIATE SEQUENCE"}
         </button>
 
-        <div className="flex-1 overflow-hidden flex flex-col border-t border-neutral-800 pt-4">
-          <div className="text-xs font-bold text-neutral-500 mb-3 flex items-center gap-2">
-            <Radio size={12}/> TACTICAL LOG
+        <div className="flex-1 overflow-hidden flex flex-col pt-2">
+          <div className="text-xs font-bold text-neutral-500 mb-3 flex items-center gap-2 uppercase tracking-wider">
+            <Radio size={14}/> Tactical Feed
           </div>
-          <div className="flex-1 overflow-y-auto text-[10px] space-y-3 pr-2 scrollbar-none font-mono leading-relaxed">
+          <div className="flex-1 overflow-y-auto text-[10px] space-y-2 pr-2 scrollbar-none font-mono leading-relaxed mask-image-gradient-b">
             {logs.map((log, i) => (
-              <div key={i} className="border-l-2 border-neutral-800 pl-3 py-1 opacity-70 hover:opacity-100 hover:border-emerald-500 transition-all cursor-crosshair">
+              <div key={i} className="border-l-[3px] border-neutral-800 pl-3 py-1 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-all truncate">
                 {log}
               </div>
             ))}
@@ -182,15 +180,14 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 右侧视口 */}
-      <div className="flex-1 relative bg-[#0a0a0a] flex flex-col">
-        <div className="h-8 border-b border-neutral-800 flex items-center px-4 justify-between text-[10px] text-neutral-600">
-           <span>SECTOR_GRID: 20x20</span>
-           <span>RENDER: 60 FPS</span>
-           <span>LATENCY: 2000ms</span>
+      {/* 右侧视口容器 */}
+      <div className="flex-1 relative flex flex-col bg-[#141414]">
+        <div className="h-10 border-b border-neutral-800 flex items-center px-6 justify-between text-[10px] font-medium text-neutral-600 bg-[#0a0a0a]">
+           <span>SECTOR: PRIME_GRID (20x20)</span>
+           <span>RENDER: 60 FPS (INTERPOLATED)</span>
         </div>
         
-        <div className="flex-1 relative">
+        <div className="flex-1 relative flex items-center justify-center p-8">
            <TacticalViewport units={units} />
         </div>
       </div>
