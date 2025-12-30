@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Cpu, Crosshair, Users, Target } from 'lucide-react';
+// ⬇️ 修复：添加了 Trophy
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Cpu, Crosshair, Trophy, Skull } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
@@ -23,11 +24,9 @@ const OBSTACLES = [
 ];
 
 const INITIAL_UNITS = [
-  // 蓝队 (左上分散)
   { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0 },
   { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0 },
   { id: 'b3', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0 },
-  // 红队 (右下分散)
   { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0 },
   { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0 },
   { id: 'r3', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0 },
@@ -42,7 +41,6 @@ export default function Home() {
   const [thoughts, setThoughts] = useState<any[]>([]);
   const [moveLines, setMoveLines] = useState<any[]>([]);
   const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
-  // 新增：被标记的单位 (Shared Intel)
   const [spottedUnits, setSpottedUnits] = useState<Set<string>>(new Set());
   
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
@@ -52,7 +50,7 @@ export default function Home() {
   useEffect(() => { unitsRef.current = units; }, [units]);
   useEffect(() => { units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y }); }, []);
 
-  // 物理检测函数 (保持不变)
+  // 物理检测函数
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
     const rx = rect.x + 0.1; const ry = rect.y + 0.1; const rw = rect.w - 0.2; const rh = rect.h - 0.2;
     const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
@@ -74,7 +72,7 @@ export default function Home() {
     return false;
   };
 
-  // === ⚡️ 反射循环 (更新视野标记) ===
+  // === ⚡️ 反射循环 ===
   useEffect(() => {
     if (!isPlaying) return;
 
@@ -86,7 +84,6 @@ export default function Home() {
       let hasUpdates = false;
       const nextUnits = currentUnits.map(u => ({ ...u }));
       
-      // 计算共享视野标记
       const currentlySpotted = new Set<string>();
 
       nextUnits.forEach(attacker => {
@@ -100,12 +97,10 @@ export default function Home() {
           if (target.team === attacker.team || target.status === 'DEAD') return;
           const dist = Math.sqrt(Math.pow(attacker.x - target.x, 2) + Math.pow(attacker.y - target.y, 2));
           
-          // 视野判定 (用于标记)
           if (dist < 35 && checkLineOfSight(attacker, target)) {
-             currentlySpotted.add(target.id); // 标记该敌人已被发现
+             currentlySpotted.add(target.id);
           }
 
-          // 射击判定 (用于开火)
           if (now - (attacker.lastShot || 0) >= stats.cooldown) {
             if (dist <= stats.range) {
               if (dist < 4 || checkLineOfSight(attacker, target)) {
@@ -145,7 +140,7 @@ export default function Home() {
         }
       });
 
-      setSpottedUnits(currentlySpotted); // 更新被发现的列表
+      setSpottedUnits(currentlySpotted);
 
       if (hasUpdates) {
         setUnits(nextUnits);
@@ -163,7 +158,6 @@ export default function Home() {
     setNetStatus('SENDING');
     try {
       const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => {
-        // 计算每个单位的个体视野，传给后端做融合
         const visibleEnemies = units
           .filter(other => other.team !== u.team && other.status === 'ALIVE')
           .filter(other => {
@@ -212,7 +206,7 @@ export default function Home() {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [isPlaying]);
 
-  // 动画循环 (保持不变)
+  // 动画循环
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -253,13 +247,12 @@ export default function Home() {
            <TacticalViewport 
              units={units} attacks={attacks} obstacles={OBSTACLES} 
              floatingTexts={floatingTexts} thoughts={thoughts} 
-             moveLines={moveLines} spottedUnits={spottedUnits} // 传入被点亮列表
+             moveLines={moveLines} spottedUnits={spottedUnits} 
              mapSize={MAP_SIZE} 
            />
         </div>
       </div>
 
-      {/* 底部数据面板 (保持不变) */}
       <div className="absolute bottom-0 left-0 w-full h-32 bg-[#0f172a]/95 border-t border-slate-800 flex divide-x divide-slate-800 z-30">
         <div className="flex-1 p-4 flex flex-col gap-2">
            <div className="flex justify-between items-center text-blue-400 font-bold mb-1 border-b border-blue-900/50 pb-1">
