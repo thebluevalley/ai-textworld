@@ -3,167 +3,111 @@ import { Stage, Graphics, Container, Text } from '@pixi/react';
 import { TextStyle } from 'pixi.js';
 import { useEffect, useState } from 'react';
 
-// === 辅助函数：绘制虚线 ===
+// ... dashed line helper (保持不变) ...
 const drawDashedLine = (g: any, p1: any, p2: any, dashLen = 4, gapLen = 2) => {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
+  const dx = p2.x - p1.x; const dy = p2.y - p1.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   const angle = Math.atan2(dy, dx);
   let currentDist = 0;
-
   while (currentDist < dist) {
-    // 画实线部分
     const x1 = p1.x + Math.cos(angle) * currentDist;
     const y1 = p1.y + Math.sin(angle) * currentDist;
     currentDist += dashLen;
     const x2 = p1.x + Math.cos(angle) * Math.min(currentDist, dist);
     const y2 = p1.y + Math.sin(angle) * Math.min(currentDist, dist);
-    g.moveTo(x1, y1);
-    g.lineTo(x2, y2);
-    // 跳过间隔部分
+    g.moveTo(x1, y1); g.lineTo(x2, y2);
     currentDist += gapLen;
   }
 };
 
-// ... FloatingText, Grid, ObstaclesLayer, Unit 保持不变 ...
-// (为了节省篇幅，这里省略了未修改的组件代码，请确保你的文件中包含它们)
+// ... FloatingText, Grid, ObstaclesLayer, Unit (保持不变) ...
 const FloatingText = ({ x, y, text, color, cellSize, onFinish }: any) => {
     const [offsetY, setOffsetY] = useState(0);
     useEffect(() => {
       let frame = 0;
-      const animate = () => {
-        frame++;
-        setOffsetY(prev => prev - 0.5);
-        if (frame < 60) requestAnimationFrame(animate);
-        else onFinish();
-      };
+      const animate = () => { frame++; setOffsetY(prev => prev - 0.5); if (frame < 60) requestAnimationFrame(animate); else onFinish(); };
       animate();
     }, []);
-    return (
-      <Text 
-        text={text} 
-        x={x * cellSize} 
-        y={y * cellSize + offsetY - cellSize} 
-        anchor={0.5}
-        style={new TextStyle({ fontSize: cellSize * 0.8, fontWeight: 'bold', fill: color, stroke: 'black', strokeThickness: 2 })}
-      />
-    );
+    return <Text text={text} x={x * cellSize} y={y * cellSize + offsetY - cellSize} anchor={0.5} style={new TextStyle({ fontSize: cellSize * 0.8, fontWeight: 'bold', fill: color, stroke: 'black', strokeThickness: 2 })} />;
 };
 const Grid = ({ mapSize, cellSize }: any) => {
-    const draw = (g: any) => {
-      g.clear();
-      g.lineStyle(1, 0x333344, 0.3);
-      for (let i = 0; i <= mapSize; i++) {
-        g.moveTo(i * cellSize, 0); g.lineTo(i * cellSize, 800);
-        g.moveTo(0, i * cellSize); g.lineTo(800, i * cellSize);
-      }
-    };
+    const draw = (g: any) => { g.clear(); g.lineStyle(1, 0x333344, 0.3); for (let i = 0; i <= mapSize; i++) { g.moveTo(i * cellSize, 0); g.lineTo(i * cellSize, 800); g.moveTo(0, i * cellSize); g.lineTo(800, i * cellSize); } };
     return <Graphics draw={draw} />;
 };
 const ObstaclesLayer = ({ data, cellSize }: any) => {
-    const draw = (g: any) => {
-      g.clear();
-      g.beginFill(0x334155);
-      g.lineStyle(1, 0x475569);
-      data.forEach((obs: any) => {
-        g.drawRect(obs.x * cellSize, obs.y * cellSize, obs.w * cellSize, obs.h * cellSize);
-        g.beginFill(0x1e293b);
-        g.drawRect((obs.x + 0.2) * cellSize, (obs.y + 0.2) * cellSize, (obs.w - 0.4) * cellSize, (obs.h - 0.4) * cellSize);
-        g.endFill();
-      });
-      g.endFill();
-    };
+    const draw = (g: any) => { g.clear(); g.beginFill(0x334155); g.lineStyle(1, 0x475569); data.forEach((obs: any) => { g.drawRect(obs.x * cellSize, obs.y * cellSize, obs.w * cellSize, obs.h * cellSize); g.beginFill(0x1e293b); g.drawRect((obs.x + 0.2) * cellSize, (obs.y + 0.2) * cellSize, (obs.w - 0.4) * cellSize, (obs.h - 0.4) * cellSize); g.endFill(); }); g.endFill(); };
     return <Graphics draw={draw} />;
 };
 const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize }: any) => {
-    const isDead = status === 'DEAD';
-    const color = team === 'BLUE' ? 0x60a5fa : 0xf87171; 
-    const radius = cellSize * 0.4;
+    const isDead = status === 'DEAD'; const color = team === 'BLUE' ? 0x60a5fa : 0xf87171; const radius = cellSize * 0.4;
     const draw = (g: any) => {
-      g.clear();
-      if (isDead) {
-        g.beginFill(0x1e293b); g.drawCircle(0, 0, radius); g.endFill(); return;
-      }
+      g.clear(); if (isDead) { g.beginFill(0x1e293b); g.drawCircle(0, 0, radius); g.endFill(); return; }
       g.beginFill(color, 0.05); g.drawCircle(0, 0, radius * 8); g.endFill();
       g.lineStyle(1, 0xffffff, 0.8); g.beginFill(color); g.drawCircle(0, 0, radius); g.endFill();
       const hpW = cellSize; const hpH = cellSize * 0.15; const hpY = -radius - hpH - 2;
       g.beginFill(0x000000); g.drawRect(-hpW/2, hpY, hpW, hpH); g.endFill();
-      const hpPercent = Math.max(0, hp / maxHp);
-      g.beginFill(hpPercent > 0.5 ? 0x22c55e : 0xff0000);
-      g.drawRect(-hpW/2, hpY, hpW * hpPercent, hpH); g.endFill();
+      const hpPercent = Math.max(0, hp / maxHp); g.beginFill(hpPercent > 0.5 ? 0x22c55e : 0xff0000); g.drawRect(-hpW/2, hpY, hpW * hpPercent, hpH); g.endFill();
     };
-    return (
-      <Container x={x * cellSize} y={y * cellSize}>
-        <Graphics draw={draw} />
-      </Container>
-    );
+    return <Container x={x * cellSize} y={y * cellSize}><Graphics draw={draw} /></Container>;
 };
-
-// === ⚡️ 精致的渐隐虚线弹道 ===
 const LaserEffects = ({ attacks, cellSize }: any) => {
-  // 使用内部状态来管理渐隐动画
-  const [fadingAttacks, setFadingAttacks] = useState<any[]>([]);
-
-  // 将新的攻击加入到渐隐队列中
-  useEffect(() => {
-    const newAttacks = attacks.filter((a: any) => 
-       // 只添加最近 100ms 内的新攻击，防止重复
-       Date.now() - a.timestamp < 100 && 
-       !fadingAttacks.some(fa => fa.timestamp === a.timestamp)
-    );
-    if (newAttacks.length > 0) {
-      // 初始 alpha 为 1.0
-      setFadingAttacks(prev => [...prev, ...newAttacks.map((a:any) => ({...a, alpha: 1.0})) ]);
-    }
-  }, [attacks]);
-
-  // 动画循环：逐渐降低 alpha
-  useEffect(() => {
-    let frameId: number;
-    const animate = () => {
-      setFadingAttacks(prev => {
-         // 每帧减少 0.03 透明度，约 30 帧(0.5秒)后消失
-         const updated = prev.map(a => ({...a, alpha: a.alpha - 0.03}));
-         // 移除完全透明的
-         return updated.filter(a => a.alpha > 0);
-      });
-      frameId = requestAnimationFrame(animate);
-    };
-    if (fadingAttacks.length > 0) frameId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frameId);
-  }, [fadingAttacks.length > 0]);
-
-  const draw = (g: any) => {
-    g.clear();
-    fadingAttacks.forEach((atk: any) => {
-      const p1 = { x: atk.from.x * cellSize, y: atk.from.y * cellSize };
-      const p2 = { x: atk.to.x * cellSize, y: atk.to.y * cellSize };
-      
-      // 设置线条样式：极细(1px)，基于透明度 faded alpha
-      // 如果是 Miss，透明度更低
-      const lineAlpha = atk.alpha * (atk.isMiss ? 0.4 : 0.8);
-      g.lineStyle(1, atk.color, lineAlpha);
-
-      // 画虚线
-      drawDashedLine(g, p1, p2);
-
-      // 如果命中且透明度较高，在目标点画一个小闪光
-      if (!atk.isMiss && atk.alpha > 0.6) {
-        g.beginFill(0xffffff, atk.alpha);
-        g.drawCircle(p2.x, p2.y, 2);
-        g.endFill();
-      }
-    });
-  };
+  const [visible, setVisible] = useState<any[]>([]);
+  useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 300)), [attacks]);
+  const draw = (g: any) => { g.clear(); visible.forEach((atk: any) => { g.lineStyle(atk.isMiss ? 1 : 2, atk.color, atk.isMiss ? 0.3 : 0.8); drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); if (!atk.isMiss) { g.beginFill(0xffffff, 0.8); g.drawCircle(atk.to.x*cellSize, atk.to.y*cellSize, 2); g.endFill(); } }); };
   return <Graphics draw={draw} />;
 };
 
-export default function TacticalViewport({ units, attacks, obstacles, floatingTexts, mapSize = 35 }: any) {
+// === 🧠 AI 思考气泡组件 ===
+const SpeechBubble = ({ x, y, text, team, cellSize }: any) => {
+  const [opacity, setOpacity] = useState(1);
+  
+  useEffect(() => {
+    // 3秒后消失
+    const timer = setTimeout(() => setOpacity(0), 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (opacity === 0) return null;
+
+  const color = team === 'BLUE' ? 0x60a5fa : 0xf87171;
+  
+  const draw = (g: any) => {
+    g.clear();
+    // 气泡背景
+    g.beginFill(0x1e293b, 0.9 * opacity);
+    g.lineStyle(1, color, opacity);
+    g.drawRoundedRect(0, 0, 80, 20, 4);
+    
+    // 小三角
+    g.moveTo(40, 20);
+    g.lineTo(35, 25);
+    g.lineTo(45, 20);
+    g.endFill();
+  };
+
+  return (
+    <Container x={x * cellSize - 40} y={y * cellSize - cellSize * 2} alpha={opacity}>
+      <Graphics draw={draw} />
+      <Text 
+        text={text} 
+        anchor={0.5} 
+        x={40} 
+        y={10} 
+        style={new TextStyle({ 
+          fontSize: 10, 
+          fill: '#ffffff', 
+          fontFamily: 'Arial',
+          align: 'center'
+        })} 
+      />
+    </Container>
+  );
+};
+
+export default function TacticalViewport({ units, attacks, obstacles, floatingTexts, thoughts, mapSize = 35 }: any) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  const cellSize = 800 / mapSize; // 动态计算格子大小
-
+  const cellSize = 800 / mapSize; 
   if (!mounted) return <div className="text-white">LOADING BATTLEFIELD...</div>;
 
   return (
@@ -174,6 +118,8 @@ export default function TacticalViewport({ units, attacks, obstacles, floatingTe
         {units.map((u: any) => <Unit key={u.id} {...u} cellSize={cellSize} zIndex={10} />)}
         <LaserEffects attacks={attacks} cellSize={cellSize} />
         {floatingTexts.map((ft: any) => <FloatingText key={ft.id} {...ft} cellSize={cellSize} onFinish={()=>{}} />)}
+        {/* 渲染思考气泡 */}
+        {thoughts && thoughts.map((t: any) => <SpeechBubble key={t.id} {...t} cellSize={cellSize} />)}
       </Container>
     </Stage>
   );

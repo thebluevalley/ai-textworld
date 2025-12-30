@@ -4,27 +4,34 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 export async function POST(req: Request) {
   const { units, obstacles, mapSize } = await req.json();
 
-  const systemPrompt = `You are a Grand Strategy AI. Map Size: ${mapSize}x${mapSize}.
-  Output RAW JSON only. Coordinates: { "x": 10, "y": 20 }.
+  const systemPrompt = `You are a Combat AI. Map: ${mapSize}x${mapSize}.
   
-  TACTICS:
-  - Advance towards map center or enemies.
-  - Snipers (Range 35) use long lines of sight.
-  - Avoid obstacles.
+  RULES OF ENGAGEMENT:
+  1. AGGRESSION: If an enemy is listed in 'visibleEnemies', you MUST ATTACK. Do not just move.
+  2. CLOSE QUARTERS: If distance < 5, FIRE immediately.
+  3. MOVING: If no enemies visible, move towards map center or last known enemy position.
   
-  Example: { "actions": [{ "unitId": "b1", "type": "MOVE", "target": {"x":25,"y":25}, "thought": "Advance" }] }
+  OUTPUT FORMAT:
+  - "thought": Short tactical phrase (max 3 words) e.g. "Firing", "Flanking", "Covering". This will be shown above unit's head.
+  - Coordinates: { "x": 10, "y": 20 }
+  
+  Example:
+  {
+    "actions": [
+      { "unitId": "b1", "type": "ATTACK", "targetUnitId": "r1", "damage": 40, "thought": "ENGAGING HOSTILE" },
+      { "unitId": "b2", "type": "MOVE", "target": {"x":12,"y":12}, "thought": "REPOSITIONING" }
+    ]
+  }
   `;
 
-  // 精简数据，减少 Token 消耗，降低 API 压力
   const promptData = units.map((u: any) => ({
     id: u.id, team: u.team, pos: u.pos, hp: u.hp, role: u.role,
-    // 只有当有敌人可见时才发 enemy 列表，否则发空，省流
-    visibleEnemies: u.visibleEnemies.length > 0 ? u.visibleEnemies : undefined
+    visibleEnemies: u.visibleEnemies // 这个列表现在更准确了
   }));
 
   const userPrompt = JSON.stringify({
     squad: promptData,
-    // 障碍物列表只发一次或简化发送，这里为了效果还是发全，但前端已做限流
+    map_obstacles: obstacles
   });
 
   const result = await AIDispatcher.chatCompletion({
@@ -33,7 +40,6 @@ export async function POST(req: Request) {
     userPrompt
   });
 
-  // 透传 429
   if (result && result.error === 429) {
     return NextResponse.json({ actions: [] }, { status: 429 });
   }
