@@ -5,10 +5,12 @@ export async function POST(req: Request) {
   const { units, obstacles } = await req.json();
 
   // 1. 构建战术 Prompt
-  // 关键修改：告诉 AI 地图上有障碍物，需要利用掩体。
-  // 关键修改：降低伤害数值，让战斗持久化。
+  // 关键修改：加强了对 JSON 格式的强制要求，禁止废话
   const systemPrompt = `You are a Tactical AI Engine.
   Map: 20x20 Grid.
+  
+  IMPORTANT: Output RAW JSON only. DO NOT add any markdown formatting, explanations, or notes.
+  I will parse your response programmatically, so any extra text will crash the system.
   
   OBSTACLES: There are walls/cover on the map. 
   Units should Move BEHIND cover to avoid damage.
@@ -24,12 +26,11 @@ export async function POST(req: Request) {
   3. Medic should use "HEAL" action type if ally is close (range 3).
   4. Attack damage: 20-50 (Randomize).
   
-  Output JSON format:
+  Output JSON format example:
   {
     "actions": [
       { "unitId": "b1", "type": "MOVE", "target": { "x": 5, "y": 6 }, "thought": "Moving to cover" },
-      { "unitId": "r1", "type": "ATTACK", "targetUnitId": "b1", "damage": 35, "thought": "Target locked" },
-      { "unitId": "b3", "type": "HEAL", "targetUnitId": "b1", "healAmount": 40, "thought": "Patching up leader" }
+      { "unitId": "r1", "type": "ATTACK", "targetUnitId": "b1", "damage": 35, "thought": "Target locked" }
     ]
   }
   `;
@@ -43,9 +44,10 @@ export async function POST(req: Request) {
       pos: [Math.round(u.x), Math.round(u.y)], 
       hp: u.hp 
     })),
-    obstacles: obstacles // 传给 AI，虽然大模型不一定能完美几何计算，但能有个概念
+    obstacles: obstacles
   });
 
+  // 2. 调用 AI
   const result = await AIDispatcher.chatCompletion({
     mode: 'reflex',
     systemPrompt,
@@ -53,6 +55,7 @@ export async function POST(req: Request) {
   });
 
   if (!result || !result.actions) {
+    // 如果解析失败，返回空数组，避免前端崩溃
     return NextResponse.json({ actions: [] });
   }
 
