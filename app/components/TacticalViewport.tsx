@@ -3,7 +3,7 @@ import { Stage, Graphics, Container, Text } from '@pixi/react';
 import { TextStyle } from 'pixi.js';
 import { useEffect, useState } from 'react';
 
-// ... drawDashedLine, FloatingText, Grid, ObstaclesLayer, MoveLines, LaserEffects (保持不变) ...
+// ... drawDashedLine, FloatingText, Grid, ObstaclesLayer, MoveLines (保持不变) ...
 const drawDashedLine = (g: any, p1: any, p2: any, dashLen = 4, gapLen = 2) => {
   const dx = p2.x - p1.x; const dy = p2.y - p1.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
@@ -46,17 +46,70 @@ const MoveLines = ({ lines, cellSize }: any) => {
   };
   return <Graphics draw={draw} />;
 };
-const LaserEffects = ({ attacks, cellSize }: any) => {
-  const [visible, setVisible] = useState<any[]>([]);
-  useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 300)), [attacks]);
-  const draw = (g: any) => { g.clear(); visible.forEach((atk: any) => { g.lineStyle(atk.isMiss ? 1 : 2, atk.color, atk.isMiss ? 0.3 : 0.8); drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); if (!atk.isMiss) { g.beginFill(0xffffff, 0.8); g.drawCircle(atk.to.x*cellSize, atk.to.y*cellSize, 2); g.endFill(); } }); };
+
+// === 💥 新增特效：受击火花 ===
+const ImpactSparks = ({ attacks, cellSize }: any) => {
+  const [sparks, setSparks] = useState<any[]>([]);
+  
+  useEffect(() => {
+    const newSparks = attacks
+      .filter((a: any) => Date.now() - a.timestamp < 100 && !a.isMiss)
+      .map((a: any) => ({ x: a.to.x, y: a.to.y, id: Math.random(), life: 10 }));
+    if(newSparks.length > 0) setSparks(prev => [...prev, ...newSparks]);
+  }, [attacks]);
+
+  // 每一帧减少寿命
+  useEffect(() => {
+    let frame: number;
+    const animate = () => {
+      setSparks(prev => prev.map(s => ({...s, life: s.life - 1})).filter(s => s.life > 0));
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const draw = (g: any) => {
+    g.clear();
+    sparks.forEach(s => {
+      g.beginFill(0xffaa00, s.life / 10);
+      // 画几个随机的小点模拟火花
+      g.drawCircle(s.x * cellSize + (Math.random()-0.5)*10, s.y * cellSize + (Math.random()-0.5)*10, 2);
+      g.drawCircle(s.x * cellSize + (Math.random()-0.5)*10, s.y * cellSize + (Math.random()-0.5)*10, 1.5);
+      g.endFill();
+    });
+  };
   return <Graphics draw={draw} />;
 };
 
-// === ⚡️ 更新的单位组件：支持“被发现”标记 ===
-const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted }: any) => {
+const LaserEffects = ({ attacks, cellSize }: any) => {
+  const [visible, setVisible] = useState<any[]>([]);
+  useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 150)), [attacks]); // 持续时间缩短，更像子弹
+  const draw = (g: any) => { 
+    g.clear(); 
+    visible.forEach((atk: any) => { 
+      const alpha = atk.isMiss ? 0.3 : 0.8;
+      g.lineStyle(atk.isMiss ? 1 : 2, 0xffffaa, alpha); // 子弹是黄白色的
+      drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); 
+      
+      // 💥 枪口火焰 (Muzzle Flash)
+      g.beginFill(0xffff00, 0.8);
+      g.drawCircle(atk.from.x * cellSize, atk.from.y * cellSize, 4);
+      g.endFill();
+    }); 
+  };
+  return <Graphics draw={draw} />;
+};
+
+// === ⚡️ 更新单位组件：支持压制抖动和警告 ===
+const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted, suppression }: any) => {
     const isDead = status === 'DEAD'; const color = team === 'BLUE' ? 0x60a5fa : 0xf87171; const radius = cellSize * 0.4;
+    const isSuppressed = (suppression || 0) > 50;
     
+    // 压制抖动效果
+    const shakeX = isSuppressed ? (Math.random() - 0.5) * 3 : 0;
+    const shakeY = isSuppressed ? (Math.random() - 0.5) * 3 : 0;
+
     const draw = (g: any) => {
       g.clear(); 
       if (isDead) { g.beginFill(0x1e293b); g.drawCircle(0, 0, radius); g.endFill(); return; }
@@ -78,16 +131,25 @@ const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted }: 
       g.beginFill(0x000000); g.drawRect(-hpW/2, hpY, hpW, hpH); g.endFill();
       const hpPercent = Math.max(0, hp / maxHp); g.beginFill(hpPercent > 0.5 ? 0x22c55e : 0xff0000); g.drawRect(-hpW/2, hpY, hpW * hpPercent, hpH); g.endFill();
 
-      // 🎯 被发现标记 (Spotted Icon)
+      // ⚠️ 压制状态警告 (黄色三角)
+      if (isSuppressed) {
+         g.beginFill(0xfacc15); // Yellow
+         g.lineStyle(1, 0x000000);
+         g.moveTo(0, -radius - 12);
+         g.lineTo(-4, -radius - 6);
+         g.lineTo(4, -radius - 6);
+         g.endFill();
+      }
+
+      // 🎯 被发现标记
       if (isSpotted) {
         g.lineStyle(2, 0xff0000, 1);
-        const sy = -radius - 15;
-        // 画个简单的瞄准框
+        const sy = -radius - 20;
         g.moveTo(-5, sy-5); g.lineTo(5, sy+5);
         g.moveTo(5, sy-5); g.lineTo(-5, sy+5);
       }
     };
-    return <Container x={x * cellSize} y={y * cellSize}><Graphics draw={draw} /></Container>;
+    return <Container x={x * cellSize + shakeX} y={y * cellSize + shakeY}><Graphics draw={draw} /></Container>;
 };
 
 const SpeechBubble = ({ x, y, text, team, cellSize }: any) => {
@@ -112,15 +174,10 @@ export default function TacticalViewport({ units, attacks, obstacles, floatingTe
       <Container sortableChildren={true}>
         <MoveLines lines={moveLines} cellSize={cellSize} />
         {units.map((u: any) => (
-          <Unit 
-            key={u.id} 
-            {...u} 
-            cellSize={cellSize} 
-            zIndex={10} 
-            isSpotted={spottedUnits.has(u.id)} // 传入是否被发现
-          />
+          <Unit key={u.id} {...u} cellSize={cellSize} zIndex={10} isSpotted={spottedUnits.has(u.id)} />
         ))}
         <LaserEffects attacks={attacks} cellSize={cellSize} />
+        <ImpactSparks attacks={attacks} cellSize={cellSize} /> {/* 💥 新增火花特效层 */}
         {floatingTexts.map((ft: any) => <FloatingText key={ft.id} {...ft} cellSize={cellSize} />)}
         {thoughts && thoughts.map((t: any) => <SpeechBubble key={t.id} {...t} cellSize={cellSize} />)}
       </Container>

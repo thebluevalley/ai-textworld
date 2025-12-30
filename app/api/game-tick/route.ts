@@ -4,77 +4,57 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 export async function POST(req: Request) {
   const { units, obstacles, mapSize } = await req.json();
 
-  // === 🧠 情报融合层 (Intel Fusion Layer) ===
-  // 计算每个队伍的“共享视野”
-  const blueIntel = new Set();
-  const redIntel = new Set();
-
-  // 第一遍遍历：收集情报
-  units.forEach((u: any) => {
-    if (u.visibleEnemies) {
-      u.visibleEnemies.forEach((e: any) => {
-        const enemyInfo = `Enemy ${e.role} at [${e.pos.x},${e.pos.y}] (HP:${e.hp})`;
-        if (u.team === 'BLUE') blueIntel.add(enemyInfo);
-        if (u.team === 'RED') redIntel.add(enemyInfo);
-      });
-    }
-  });
-
-  const systemPrompt = `You are a SQUAD COMMANDER AI. Map: ${mapSize}x${mapSize}.
+  const systemPrompt = `You are a USMC TACTICAL AI COMMANDER. Map: ${mapSize}x${mapSize}.
   
-  CORE MECHANIC: **HIVE MIND INTELLIGENCE**
-  - All units share vision. If Unit A sees an enemy, Unit B knows its location too.
-  - Use this to coordinate attacks even if units are separated.
+  DOCTRINE: "FIRE AND MANEUVER"
   
-  TACTICAL DOCTRINE:
-  1. 📡 SHARED VISION: 
-     - If a teammate spots an enemy, other units must MOVE to engage or flank that target.
-     - Do not wander aimlessly if a target is known.
+  1. 📉 SUPPRESSION LOGIC:
+     - If a teammate is "SUPPRESSED" (taking fire), they cannot aim well.
+     - ACTION: Another unit MUST fire at the enemy to suppress THEM back (Cover Fire).
+     - The suppressed unit should RETREAT or HOLD COVER.
   
-  2. 🤝 COORDINATION:
-     - **FOCUS FIRE:** If multiple units can reach a target, attack the SAME target to kill it faster.
-     - **SUPPORT:** If a unit is low HP, nearby allies should move in front to tank damage (Body Block).
+  2. 🧱 BOUNDING OVERWATCH:
+     - NEVER move everyone at once.
+     - Split squad into "Base of Fire" (Stationary, shooting) and "Maneuver Element" (Moving).
+     - SNIPER/LEADER: Hold angles (Overwatch).
+     - ASSAULT: Move to flank while others shoot.
   
-  3. ⚔️ ROLES:
-     - SNIPER: Move to a line-of-sight that covers the "Known Enemy Locations".
-     - ASSAULT: Rush the "Known Enemy Locations" via flank routes.
+  3. ⚠️ ENGAGEMENT CONTROL:
+     - Outnumbered? RETREAT.
+     - Enemy in strong cover? FLANK (Do not shoot wall).
+     - Enemy in open? FOCUS FIRE.
   
   OUTPUT FORMAT:
-  - "thought": Team-based reasoning (e.g., "Moving to support B1", "Flanking spotted sniper").
+  - "thought": Tactical callout (e.g. "Covering Fire!", "Bounding Forward!", "Pinned Down!").
+  - "type": "MOVE" (Shooting is automatic by reflex engine, you manage positioning).
+  - Coordinates: Integers.
   
   Example:
   {
     "actions": [
-      { "unitId": "b2", "type": "MOVE", "target": {"x": 10, "y": 10}, "thought": "Responding to B1's ping" }
+      { "unitId": "b1", "type": "MOVE", "target": {"x": 5, "y": 10}, "thought": "Bounding to cover" },
+      { "unitId": "b2", "type": "MOVE", "target": {"x": 5, "y": 5}, "thought": "Holding Overwatch" } // Moves slightly or stays
     ]
   }
   `;
 
-  const promptData = units.map((u: any) => {
-    const myPos = u.pos || { x: u.x, y: u.y };
-    // 注入团队情报：即使我自己没看见，如果队友看见了，我也能知道
-    const teamKnowledge = u.team === 'BLUE' ? Array.from(blueIntel) : Array.from(redIntel);
-    
-    return {
-      id: u.id, 
-      team: u.team, 
-      pos: myPos, 
-      hp: u.hp, 
-      role: u.role,
-      // 告诉 AI：我自己看见了谁
-      myVision: u.visibleEnemies.map((e:any) => e.id),
-      // 告诉 AI：我们全队都知道谁在哪 (这是关键！)
-      squadIntel: teamKnowledge 
-    };
-  });
+  const promptData = units.map((u: any) => ({
+    id: u.id, 
+    team: u.team, 
+    role: u.role, 
+    pos: u.pos || {x: u.x, y: u.y}, 
+    hp: u.hp, 
+    suppression: u.suppression || 0, // 告诉 AI 谁被打得抬不起头
+    isSuppressed: (u.suppression || 0) > 50
+  }));
 
   const simplifiedObstacles = obstacles.map((o:any) => ({ 
-    type: "WALL", x: Math.round(o.x + o.w/2), y: Math.round(o.y + o.h/2) 
+    type: "COVER", x: Math.round(o.x + o.w/2), y: Math.round(o.y + o.h/2) 
   }));
 
   const userPrompt = JSON.stringify({
     squad_status: promptData,
-    key_locations: simplifiedObstacles.slice(0, 6) 
+    cover_locations: simplifiedObstacles.slice(0, 6) 
   });
 
   const result = await AIDispatcher.chatCompletion({
