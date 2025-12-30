@@ -34,29 +34,47 @@ export async function POST(req: Request) {
   }
   `;
 
-  // Pre-process data to give AI situational awareness
-  const promptData = units.map((u: any) => ({
-    id: u.id, 
-    team: u.team, 
-    pos: u.pos, 
-    hp: u.hp, 
-    role: u.role,
-    // Provide simplified enemy data
-    visibleEnemies: u.visibleEnemies.map((e:any) => ({ 
-      id: e.id, 
-      hp: e.hp, 
-      dist: Math.round(Math.sqrt(Math.pow(u.pos.x - e.pos.x, 2) + Math.pow(u.pos.y - e.pos.y, 2))) 
-    }))
-  }));
+  // === 🛠️ 修复：坐标数据健壮性处理 ===
+  // 无论前端发来的是扁平结构 (x,y) 还是嵌套结构 (pos.x, pos.y)，这里都能兼容
+  const promptData = units.map((u: any) => {
+    // 强制获取自身坐标
+    const myPos = u.pos || { x: u.x, y: u.y };
 
-  // Send simplified obstacle data (just centers) to save tokens but give spatial awareness
+    // 处理可见敌人列表
+    const processedEnemies = (u.visibleEnemies || []).map((e: any) => {
+      // 强制获取敌人坐标 (兼容 e.pos 或 e.x/e.y)
+      const ePos = e.pos || { x: e.x || 0, y: e.y || 0 };
+      
+      // 安全计算距离
+      const dx = myPos.x - ePos.x;
+      const dy = myPos.y - ePos.y;
+      const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
+
+      return { 
+        id: e.id, 
+        hp: e.hp, 
+        dist: dist 
+      };
+    });
+
+    return {
+      id: u.id, 
+      team: u.team, 
+      pos: myPos, // 修正后的坐标对象
+      hp: u.hp, 
+      role: u.role,
+      visibleEnemies: processedEnemies
+    };
+  });
+
+  // 简化障碍物数据 (只发中心点，省 Token)
   const simplifiedObstacles = obstacles.map((o:any) => ({ 
-    type: "COVER", x: o.x + o.w/2, y: o.y + o.h/2 
+    type: "COVER", x: Math.round(o.x + o.w/2), y: Math.round(o.y + o.h/2) 
   }));
 
   const userPrompt = JSON.stringify({
     squad_status: promptData,
-    nearby_cover: simplifiedObstacles.slice(0, 6) // Give them a few cover options
+    nearby_cover: simplifiedObstacles.slice(0, 6) 
   });
 
   const result = await AIDispatcher.chatCompletion({
