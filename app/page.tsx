@@ -1,30 +1,34 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Shield, Skull } from 'lucide-react';
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Cpu, Crosshair } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
 const MOVE_SPEED = 0.008; 
 const MAP_SIZE = 30;
 
-// === 🏟️ TACTICAL ARENA ===
+// === ⚔️ 武器参数 (算法层) ===
+const WEAPON_STATS: any = {
+  SNIPER:  { range: 25, damage: 120, cooldown: 3000, accuracy: 0.95 }, // 攻速慢，伤害极高
+  ASSAULT: { range: 8,  damage: 25,  cooldown: 800,  accuracy: 0.80 }, // 攻速快，突突突
+  LEADER:  { range: 12, damage: 40,  cooldown: 1200, accuracy: 0.85 },
+  MEDIC:   { range: 6,  damage: 15,  cooldown: 1000, accuracy: 0.70 },
+};
+
 const OBSTACLES = [
-  { x: 14, y: 10, w: 2, h: 10 }, // Center vertical
-  { x: 10, y: 14, w: 10, h: 2 }, // Center horizontal
-  { x: 5, y: 5, w: 5, h: 5 },    // Top-left bunker
-  { x: 20, y: 20, w: 5, h: 5 },  // Bottom-right bunker
-  { x: 2, y: 15, w: 4, h: 1 },   // Flanking wall
-  { x: 24, y: 15, w: 4, h: 1 },  // Flanking wall
+  { x: 14, y: 10, w: 2, h: 10 }, { x: 10, y: 14, w: 10, h: 2 },
+  { x: 5, y: 5, w: 5, h: 5 }, { x: 20, y: 20, w: 5, h: 5 },
+  { x: 2, y: 15, w: 4, h: 1 }, { x: 24, y: 15, w: 4, h: 1 },
 ];
 
 const INITIAL_UNITS = [
-  { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE' },
-  { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE' },
-  { id: 'b3', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE' },
-  { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE' },
-  { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE' },
-  { id: 'r3', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE' },
+  { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0 },
+  { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0 },
+  { id: 'b3', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0 },
+  { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0 },
+  { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0 },
+  { id: 'r3', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0 },
 ];
 
 export default function Home() {
@@ -38,15 +42,22 @@ export default function Home() {
   const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
   
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
+  const unitsRef = useRef(units); // 用于反射循环的最新状态引用
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // === PHYSICS & TACTICS HELPERS ===
+  // 同步 Ref
+  useEffect(() => { unitsRef.current = units; }, [units]);
+  useEffect(() => {
+    units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y });
+  }, []);
+
+  // === 📐 物理引擎 ===
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
     const rx = rect.x + 0.1; const ry = rect.y + 0.1; const rw = rect.w - 0.2; const rh = rect.h - 0.2;
     const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
     const minY = Math.min(p1.y, p2.y); const maxY = Math.max(p1.y, p2.y);
     if (rx > maxX || rx + rw < minX || ry > maxY || ry + rh < minY) return false;
-    const steps = 10;
+    const steps = 8;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps; const px = p1.x + (p2.x - p1.x) * t; const py = p1.y + (p2.y - p1.y) * t;
       if (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh) return true;
@@ -64,37 +75,101 @@ export default function Home() {
     return false;
   };
 
-  // Check if unit is near cover (bonus defense)
-  const isNearCover = (u: any) => {
-    for (const obs of OBSTACLES) {
-      // Check if within 1.5 tiles of an obstacle
-      const distX = Math.max(0, Math.abs(u.x - (obs.x + obs.w/2)) - obs.w/2);
-      const distY = Math.max(0, Math.abs(u.y - (obs.y + obs.h/2)) - obs.h/2);
-      if (distX < 1.5 && distY < 1.5) return true;
-    }
-    return false;
-  };
-
+  // === ⚡️ 算法反射层 (Reflex Engine) ===
+  // 这是一个高频循环，处理“看见就打”的低级智能
   useEffect(() => {
-    units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y });
-  }, []);
+    if (!isPlaying) return;
 
-  const runGameLoop = async () => {
+    const reflexInterval = setInterval(() => {
+      const currentUnits = unitsRef.current; // 使用 Ref 获取最新状态，避免闭包陷阱
+      const now = Date.now();
+      const newAttacks: any[] = [];
+      const newTexts: any[] = [];
+      let hasUpdates = false;
+
+      // 创建一个副本进行修改
+      const nextUnits = currentUnits.map(u => ({ ...u }));
+
+      nextUnits.forEach(attacker => {
+        if (attacker.status === 'DEAD') return;
+
+        const stats = WEAPON_STATS[attacker.role] || WEAPON_STATS['ASSAULT'];
+
+        // 检查冷却
+        if (now - (attacker.lastShot || 0) < stats.cooldown) return;
+
+        // 寻找目标 (最近的、可见的敌人)
+        let bestTarget: any = null;
+        let minDist = Infinity;
+
+        nextUnits.forEach(target => {
+          if (target.team === attacker.team || target.status === 'DEAD') return;
+
+          const dist = Math.sqrt(Math.pow(attacker.x - target.x, 2) + Math.pow(attacker.y - target.y, 2));
+          
+          if (dist <= stats.range) {
+            // 距离判定通过，检查视线 (距离极近则无视墙体)
+            if (dist < 4 || checkLineOfSight(attacker, target)) {
+              if (dist < minDist) {
+                minDist = dist;
+                bestTarget = target;
+              }
+            }
+          }
+        });
+
+        // 如果找到目标，自动开火
+        if (bestTarget) {
+          attacker.lastShot = now; // 重置冷却
+          hasUpdates = true;
+
+          const isHit = Math.random() < stats.accuracy;
+          
+          newAttacks.push({
+            from: { x: attacker.x, y: attacker.y },
+            to: { x: bestTarget.x, y: bestTarget.y },
+            color: attacker.team === 'BLUE' ? 0x60a5fa : 0xf87171,
+            isMiss: !isHit,
+            timestamp: now
+          });
+
+          if (isHit) {
+            let dmg = stats.damage;
+            // 暴击逻辑
+            if (Math.random() > 0.85) { dmg = Math.floor(dmg * 1.5); }
+            
+            bestTarget.hp = Math.max(0, bestTarget.hp - dmg);
+            if (bestTarget.hp === 0) bestTarget.status = 'DEAD';
+            
+            newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: `-${dmg}`, color: "#fff", id: Math.random() });
+          } else {
+            newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: "MISS", color: "#fbbf24", id: Math.random() });
+          }
+        }
+      });
+
+      if (hasUpdates) {
+        setUnits(nextUnits);
+        if (newAttacks.length > 0) setAttacks(prev => [...newAttacks, ...prev].slice(0, 20)); // 保留最近20次
+        if (newTexts.length > 0) setFloatingTexts(prev => [...prev, ...newTexts]);
+      }
+
+    }, 200); // ⚡️ 每 200ms 运行一次反射循环 (5 FPS)
+
+    return () => clearInterval(reflexInterval);
+  }, [isPlaying]);
+
+
+  // === 🧠 大模型战术层 (Cortex Engine) ===
+  const runAiLoop = async () => {
     if (!isPlaying) return;
     setNetStatus('SENDING');
 
     try {
-      const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => {
-        const visibleEnemies = units
-          .filter(other => other.team !== u.team && other.status === 'ALIVE')
-          .filter(other => {
-             const dist = Math.sqrt(Math.pow(u.x - other.x, 2) + Math.pow(u.y - other.y, 2));
-             if (dist < 8) return true; 
-             return dist < 35 && checkLineOfSight(u, other);
-          })
-          .map(other => ({ id: other.id, pos: {x: other.x, y: other.y}, hp: other.hp, role: other.role }));
-        return { ...u, visibleEnemies };
-      });
+      // 只需要发送位置和状态，不需要发 visibleEnemies 了，因为 AI 专注走位
+      const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => ({
+         id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp
+      }));
 
       const res = await fetch('/api/game-tick', {
         method: 'POST',
@@ -103,7 +178,7 @@ export default function Home() {
 
       if (res.status === 429) {
         setNetStatus('COOLING');
-        timerRef.current = setTimeout(runGameLoop, 10000);
+        timerRef.current = setTimeout(runAiLoop, 10000);
         return;
       }
 
@@ -111,9 +186,6 @@ export default function Home() {
         setNetStatus('IDLE');
         const data = await res.json();
         if (data.actions) {
-          const currentTickAttacks: any[] = [];
-          const newTexts: any[] = [];
-          const newLogs: any[] = [];
           const newThoughts: any[] = [];
           const newMoveLines: any[] = [];
           
@@ -121,81 +193,37 @@ export default function Home() {
             const actor = units.find(u => u.id === a.unitId);
             if (!actor || actor.status === 'DEAD') return;
 
+            // AI 现在主要负责 MOVE 和 战术思考
             if (a.thought) newThoughts.push({ x: actor.x, y: actor.y, text: a.thought, team: actor.team, id: Math.random() });
 
-            if (a.type === 'ATTACK' && a.targetUnitId) {
-              const target = units.find(u => u.id === a.targetUnitId);
-              if (target && target.hp > 0) {
-                // Calculate Hit Chance & Damage
-                let hitChance = 0.85;
-                let damageMultiplier = 1.0;
-                
-                // Cover Bonus
-                if (isNearCover(target)) {
-                   damageMultiplier = 0.5; // 50% damage reduction in cover
-                   hitChance = 0.7; // Harder to hit
-                }
-
-                const isHit = Math.random() < hitChance;
-                currentTickAttacks.push({
-                  from: { x: actor.x, y: actor.y },
-                  to: { x: target.x, y: target.y },
-                  color: actor.team === 'BLUE' ? 0x60a5fa : 0xf87171,
-                  isMiss: !isHit,
-                  timestamp: Date.now()
-                });
-
-                if (isHit) {
-                  let dmg = Math.floor((a.damage || 40) * damageMultiplier);
-                  let hitText = `-${dmg}`;
-                  
-                  if (damageMultiplier < 1.0) {
-                     hitText = `🛡️-${dmg}`; // Show shield icon for cover hits
-                  }
-
-                  newTexts.push({ x: target.x, y: target.y, text: hitText, color: damageMultiplier < 1 ? "#93c5fd" : "#fff", id: Math.random() });
-                  setUnits(prev => prev.map(u => {
-                    if (u.id === target.id) {
-                      const newHp = Math.max(0, u.hp - dmg);
-                      return { ...u, hp: newHp, status: newHp <= 0 ? 'DEAD' : 'ALIVE' };
-                    }
-                    return u;
-                  }));
-                  newLogs.push({ text: `${actor.id} hit ${target.id} (${damageMultiplier < 1 ? 'Cover' : 'Open'})`, team: actor.team });
-                } else {
-                  newTexts.push({ x: target.x, y: target.y, text: "MISS", color: "#fbbf24", id: Math.random() });
-                }
-              }
-            }
-            else if (a.type === 'MOVE' && a.target) {
+            if (a.type === 'MOVE' && a.target) {
               const tx = Math.max(1, Math.min(MAP_SIZE-1, a.target.x));
               const ty = Math.max(1, Math.min(MAP_SIZE-1, a.target.y));
               targetsRef.current[a.unitId] = { x: tx, y: ty };
               newMoveLines.push({ from: {x: actor.x, y: actor.y}, to: {x: tx, y: ty}, color: actor.team === 'BLUE' ? 0x60a5fa : 0xf87171 });
             }
+            // 注意：我们忽略 AI 的 ATTACK 指令，因为反射层已经处理了
           });
-          setLogs(prev => [...newLogs, ...prev].slice(0, 10));
-          setAttacks(currentTickAttacks);
-          setFloatingTexts(prev => [...prev, ...newTexts]);
           setThoughts(newThoughts);
           setMoveLines(newMoveLines);
         }
-        timerRef.current = setTimeout(runGameLoop, 2000);
+        timerRef.current = setTimeout(runAiLoop, 3000); // AI 思考频率可以慢一点
       } else {
-        timerRef.current = setTimeout(runGameLoop, 5000);
+        timerRef.current = setTimeout(runAiLoop, 5000);
       }
     } catch (e) {
       console.error(e);
-      timerRef.current = setTimeout(runGameLoop, 5000);
+      timerRef.current = setTimeout(runAiLoop, 5000);
     }
   };
 
   useEffect(() => {
-    if (isPlaying) { runGameLoop(); } 
+    if (isPlaying) { runAiLoop(); } 
     else { if (timerRef.current) clearTimeout(timerRef.current); setNetStatus('IDLE'); }
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [isPlaying]);
 
+  // 物理移动循环 (保持不变)
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -222,12 +250,12 @@ export default function Home() {
     <main className="h-screen w-full bg-[#020617] text-slate-300 font-sans flex overflow-hidden">
       <div className="absolute top-0 left-0 w-full h-14 bg-[#0f172a] border-b border-slate-800 z-20 flex items-center justify-between px-6">
         <h1 className="text-lg font-bold text-white flex items-center gap-2">
-          <Shield className="text-emerald-500" />
-          SMART WARGAME <span className="text-[10px] bg-emerald-900 px-2 rounded">COVER SYSTEM ACTIVE</span>
-          {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI THINKING</span>}
+          <Cpu className="text-cyan-500" />
+          HYBRID ENGINE <span className="text-[10px] bg-cyan-900 px-2 rounded">REFLEX+CORTEX</span>
+          {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI STRATEGY</span>}
         </h1>
         <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
-          {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START BATTLE"}
+          {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START SIM"}
         </button>
       </div>
       <div className="flex-1 flex items-center justify-center bg-[#020617] pt-14">
@@ -238,9 +266,10 @@ export default function Home() {
            />
         </div>
         <div className="absolute bottom-4 left-4 w-96 bg-slate-900/90 p-3 rounded border border-slate-700 pointer-events-none">
-           <div className="space-y-1 max-h-32 overflow-y-auto">
-             {logs.map((log, i) => (
-               <div key={i} className={`text-[10px] font-mono ${log.team === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>{log.text}</div>
+           <div className="text-[10px] text-slate-500 mb-1 flex items-center gap-1"><Crosshair size={10}/> AUTO-ENGAGE LOG</div>
+           <div className="space-y-0.5 max-h-32 overflow-y-auto">
+             {floatingTexts.slice(-5).map((t, i) => (
+               <div key={i} className="text-[10px] text-slate-400">HIT at {Math.round(t.x)},{Math.round(t.y)}: {t.text}</div>
              ))}
            </div>
         </div>
