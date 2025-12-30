@@ -1,29 +1,37 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, RefreshCw, Map as MapIcon, Wifi, AlertTriangle } from 'lucide-react';
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
-const MOVE_SPEED = 0.005; 
-const MAP_SIZE = 50;
+const MOVE_SPEED = 0.006; // 稍微快一点点适应中等地图
+const MAP_SIZE = 35;      // ⚡️ 地图缩小至 35x35
 
-// === 🏙️ 障碍物 ===
+// === 🏙️ 中型战场障碍物布局 ===
 const OBSTACLES = [
-  { x: 5, y: 5, w: 8, h: 5 }, { x: 15, y: 8, w: 5, h: 8 },
-  { x: 35, y: 35, w: 10, h: 5 }, { x: 30, y: 30, w: 5, h: 8 },
-  { x: 20, y: 20, w: 2, h: 2 }, { x: 28, y: 20, w: 2, h: 2 },
-  { x: 20, y: 28, w: 2, h: 2 }, { x: 28, y: 28, w: 2, h: 2 },
-  { x: 10, y: 40, w: 15, h: 1 }, { x: 25, y: 10, w: 15, h: 1 },
+  // 左上城区
+  { x: 4, y: 4, w: 6, h: 4 },
+  { x: 12, y: 6, w: 4, h: 6 },
+  // 右下城区
+  { x: 25, y: 25, w: 6, h: 5 },
+  { x: 20, y: 22, w: 4, h: 6 },
+  // 中央争夺点
+  { x: 16, y: 16, w: 3, h: 3 },
+  // 外围掩体
+  { x: 8, y: 28, w: 8, h: 1 },
+  { x: 22, y: 8, w: 1, h: 8 },
 ];
 
 const INITIAL_UNITS = [
+  // 蓝队 (左上)
   { id: 'b1', team: 'BLUE', role: 'LEADER', x: 2, y: 2, hp: 1000, maxHp: 1000, status: 'ALIVE' },
   { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 1, y: 1, hp: 600, maxHp: 600, status: 'ALIVE' },
   { id: 'b3', team: 'BLUE', role: 'MEDIC', x: 3, y: 1, hp: 800, maxHp: 800, status: 'ALIVE' },
-  { id: 'r1', team: 'RED', role: 'LEADER', x: 48, y: 48, hp: 1000, maxHp: 1000, status: 'ALIVE' },
-  { id: 'r2', team: 'RED', role: 'SNIPER', x: 49, y: 49, hp: 600, maxHp: 600, status: 'ALIVE' },
-  { id: 'r3', team: 'RED', role: 'ASSAULT', x: 47, y: 47, hp: 900, maxHp: 900, status: 'ALIVE' },
+  // 红队 (右下)
+  { id: 'r1', team: 'RED', role: 'LEADER', x: 32, y: 32, hp: 1000, maxHp: 1000, status: 'ALIVE' },
+  { id: 'r2', team: 'RED', role: 'SNIPER', x: 33, y: 33, hp: 600, maxHp: 600, status: 'ALIVE' },
+  { id: 'r3', team: 'RED', role: 'ASSAULT', x: 31, y: 31, hp: 900, maxHp: 900, status: 'ALIVE' },
 ];
 
 export default function Home() {
@@ -32,19 +40,17 @@ export default function Home() {
   const [logs, setLogs] = useState<any[]>([]);
   const [attacks, setAttacks] = useState<any[]>([]);
   const [floatingTexts, setFloatingTexts] = useState<any[]>([]); 
-  
-  // === 🚦 网络状态流控 ===
   const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
   
   const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
-  const timerRef = useRef<NodeJS.Timeout | null>(null); // 用于存定时器以便清除
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 物理引擎函数保持不变...
+  // 物理检测函数 (保持不变)
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
     const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
     const minY = Math.min(p1.y, p2.y); const maxY = Math.max(p1.y, p2.y);
     if (rect.x > maxX || rect.x + rect.w < minX || rect.y > maxY || rect.y + rect.h < minY) return false;
-    const steps = 15;
+    const steps = 10; // 采样点稍微减少适应新地图
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const px = p1.x + (p2.x - p1.x) * t;
@@ -66,19 +72,19 @@ export default function Home() {
     units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y });
   }, []);
 
-  // === 🧠 核心重构：递归式 AI 循环 ===
+  // === 递归式 AI 循环 (防堆积) ===
   const runGameLoop = async () => {
     if (!isPlaying) return;
-    
-    setNetStatus('SENDING'); // 状态：发送中
+    setNetStatus('SENDING');
 
     try {
       const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => {
+        // 在 35x35 地图上，视距设为 25格
         const visibleEnemies = units
           .filter(other => other.team !== u.team && other.status === 'ALIVE')
           .filter(other => {
              const dist = Math.sqrt(Math.pow(u.x - other.x, 2) + Math.pow(u.y - other.y, 2));
-             return dist < 35 && checkLineOfSight(u, other);
+             return dist < 25 && checkLineOfSight(u, other);
           })
           .map(other => ({ id: other.id, pos: {x: other.x, y: other.y}, hp: other.hp, role: other.role }));
         return { ...u, visibleEnemies };
@@ -89,11 +95,9 @@ export default function Home() {
         body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES, mapSize: MAP_SIZE })
       });
 
-      // === 🛡️ 429 处理 ===
       if (res.status === 429) {
         console.warn("Rate Limit! Cooling down for 10s...");
-        setNetStatus('COOLING'); // 状态：冷却中
-        // 如果被限流，等 10秒 再试
+        setNetStatus('COOLING');
         timerRef.current = setTimeout(runGameLoop, 10000);
         return;
       }
@@ -102,7 +106,6 @@ export default function Home() {
         setNetStatus('IDLE');
         const data = await res.json();
         if (data.actions) {
-          // ... 处理逻辑 (保持不变) ...
           const currentTickAttacks: any[] = [];
           const newTexts: any[] = [];
           const newLogs: any[] = [];
@@ -152,11 +155,9 @@ export default function Home() {
           setAttacks(currentTickAttacks);
           setFloatingTexts(prev => [...prev, ...newTexts]);
         }
-        
-        // 成功后，等 2秒 再发下一次 (正常的 2秒间隔)
-        timerRef.current = setTimeout(runGameLoop, 2000);
+        // 成功后，等 2.5秒 再发下一次
+        timerRef.current = setTimeout(runGameLoop, 2500);
       } else {
-        // 其他错误，等 5秒 重试
         timerRef.current = setTimeout(runGameLoop, 5000);
       }
     } catch (e) {
@@ -165,20 +166,13 @@ export default function Home() {
     }
   };
 
-  // 监听 isPlaying 变化来启动/停止循环
   useEffect(() => {
-    if (isPlaying) {
-      runGameLoop();
-    } else {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      setNetStatus('IDLE');
-    }
-    // Cleanup
+    if (isPlaying) { runGameLoop(); } 
+    else { if (timerRef.current) clearTimeout(timerRef.current); setNetStatus('IDLE'); }
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [isPlaying]);
 
-
-  // === 🎥 动画循环 ===
+  // === 动画循环 (保持不变) ===
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -189,10 +183,7 @@ export default function Home() {
         const dx = target.x - u.x;
         const dy = target.y - u.y;
         if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return { ...u, x: target.x, y: target.y };
-        
-        let newX = u.x + dx * MOVE_SPEED;
-        let newY = u.y + dy * MOVE_SPEED;
-        
+        let newX = u.x + dx * MOVE_SPEED; let newY = u.y + dy * MOVE_SPEED;
         if (isColliding(newX, newY)) {
            if (!isColliding(newX, u.y)) newY = u.y;
            else if (!isColliding(u.x, newY)) newX = u.x;
@@ -211,12 +202,9 @@ export default function Home() {
       <div className="absolute top-0 left-0 w-full h-14 bg-[#0f172a] border-b border-slate-800 z-20 flex items-center justify-between px-6">
         <h1 className="text-lg font-bold text-white flex items-center gap-2">
           <MapIcon className="text-indigo-500" />
-          GRAND BATTLEFIELD
-          
-          {/* 状态指示器 */}
+          BATTLEFIELD <span className="text-[10px] bg-indigo-900 px-2 rounded">35x35 SECTOR</span>
           {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> SYNCING</span>}
-          {netStatus === 'COOLING' && <span className="text-[10px] bg-amber-900 text-amber-200 px-2 rounded flex items-center gap-1"><AlertTriangle size={10}/> RATE LIMIT (WAITing 10s)</span>}
-        
+          {netStatus === 'COOLING' && <span className="text-[10px] bg-amber-900 text-amber-200 px-2 rounded flex items-center gap-1"><AlertTriangle size={10}/> RATE LIMIT (WAIT)</span>}
         </h1>
         <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
           {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START OPS"}
@@ -224,6 +212,7 @@ export default function Home() {
       </div>
       <div className="flex-1 flex items-center justify-center bg-[#020617] pt-14">
         <div className="border border-slate-800 shadow-2xl relative">
+           {/* 传入新的 mapSize */}
            <TacticalViewport units={units} attacks={attacks} obstacles={OBSTACLES} floatingTexts={floatingTexts} mapSize={MAP_SIZE} />
         </div>
         <div className="absolute bottom-4 left-4 w-80 bg-slate-900/90 p-3 rounded border border-slate-700 pointer-events-none">
