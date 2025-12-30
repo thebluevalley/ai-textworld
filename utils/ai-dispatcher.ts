@@ -23,7 +23,6 @@ export class AIDispatcher {
     // ⚡ 极速模式：实名账号冷却仅需 1000ms
     const cooldown = 1000; 
     
-    // 1. 优先寻找空闲 Key
     const shuffled = keys.sort(() => 0.5 - Math.random());
     
     for (const key of shuffled) {
@@ -37,11 +36,9 @@ export class AIDispatcher {
       }
     }
 
-    // 2. 强制回退 (防卡死)
-    // 对于实名账号，其实很少会走到这一步，除非你并发太高
+    // 强制回退
     let oldestKey = keys[0];
     let oldestTime = now;
-
     for (const key of keys) {
       const cleanKey = key.trim();
       const lastUsed = keyUsageHistory[cleanKey] || 0;
@@ -50,7 +47,6 @@ export class AIDispatcher {
         oldestKey = cleanKey;
       }
     }
-
     keyUsageHistory[oldestKey] = now;
     return oldestKey;
   }
@@ -90,13 +86,20 @@ export class AIDispatcher {
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // 外科手术式提取 JSON
+      // 1. 清洗 Markdown
       content = content.replace(/```json/g, '').replace(/```/g, '');
+      
+      // 2. 提取 JSON 主体
       const firstBrace = content.indexOf('{');
       const lastBrace = content.lastIndexOf('}');
 
       if (firstBrace !== -1 && lastBrace !== -1) {
-        const jsonString = content.substring(firstBrace, lastBrace + 1);
+        let jsonString = content.substring(firstBrace, lastBrace + 1);
+        
+        // === 🛠️ 核心修复：自动修补 AI 漏写的 "y" 键 ===
+        // 将 { "x": 17, 12 } 替换为 { "x": 17, "y": 12 }
+        jsonString = jsonString.replace(/"x":\s*(\d+),\s*(\d+)\s*}/g, '"x": $1, "y": $2 }');
+
         try {
           return JSON.parse(jsonString);
         } catch (e) {
