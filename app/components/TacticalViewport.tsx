@@ -39,12 +39,20 @@ const MoveLines = ({ lines, cellSize }: any) => {
   const draw = (g: any) => {
     g.clear();
     lines.forEach((line: any) => {
-      g.lineStyle(1, line.color, 0.3);
-      const p1 = {x: line.from.x * cellSize, y: line.from.y * cellSize};
-      const p2 = {x: line.to.x * cellSize, y: line.to.y * cellSize};
-      drawDashedLine(g, p1, p2, 6, 4);
-      g.moveTo(p2.x - 3, p2.y - 3); g.lineTo(p2.x + 3, p2.y + 3);
-      g.moveTo(p2.x + 3, p2.y - 3); g.lineTo(p2.x - 3, p2.y + 3);
+      // RUSH 战术显示为加粗实线
+      if (line.tactic === 'RUSH') {
+         g.lineStyle(2, line.color, 0.6);
+         g.moveTo(line.from.x * cellSize, line.from.y * cellSize);
+         g.lineTo(line.to.x * cellSize, line.to.y * cellSize);
+      } else {
+         g.lineStyle(1, line.color, 0.3);
+         const p1 = {x: line.from.x * cellSize, y: line.from.y * cellSize};
+         const p2 = {x: line.to.x * cellSize, y: line.to.y * cellSize};
+         drawDashedLine(g, p1, p2, 6, 4);
+      }
+      // 终点叉叉
+      g.moveTo(line.to.x*cellSize - 3, line.to.y*cellSize - 3); g.lineTo(line.to.x*cellSize + 3, line.to.y*cellSize + 3);
+      g.moveTo(line.to.x*cellSize + 3, line.to.y*cellSize - 3); g.lineTo(line.to.x*cellSize - 3, line.to.y*cellSize + 3);
     });
   };
   return <Graphics draw={draw} />;
@@ -69,8 +77,18 @@ const ImpactSparks = ({ attacks, cellSize }: any) => {
 
 const LaserEffects = ({ attacks, cellSize }: any) => {
   const [visible, setVisible] = useState<any[]>([]);
-  useEffect(() => setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 150)), [attacks]); 
-  const draw = (g: any) => { g.clear(); visible.forEach((atk: any) => { const alpha = atk.isMiss ? 0.3 : 0.8; g.lineStyle(atk.isMiss ? 1 : 2, 0xffffaa, alpha); drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); g.beginFill(0xffff00, 0.8); g.drawCircle(atk.from.x * cellSize, atk.from.y * cellSize, 4); g.endFill(); }); };
+  useEffect(() => { setVisible(attacks.filter((a: any) => Date.now() - a.timestamp < 150)); }, [attacks]); 
+  const draw = (g: any) => { 
+    g.clear(); 
+    visible.forEach((atk: any) => { 
+      const alpha = atk.isMiss ? 0.3 : 0.8;
+      // 压制射击更粗
+      const width = atk.isSuppressionFire ? 3 : 1; 
+      g.lineStyle(width, 0xffffaa, alpha); 
+      drawDashedLine(g, {x:atk.from.x*cellSize, y:atk.from.y*cellSize}, {x:atk.to.x*cellSize, y:atk.to.y*cellSize}); 
+      g.beginFill(0xffff00, 0.8); g.drawCircle(atk.from.x * cellSize, atk.from.y * cellSize, 4); g.endFill(); 
+    }); 
+  };
   return <Graphics draw={draw} />;
 };
 
@@ -89,7 +107,7 @@ const Unit = ({ x, y, hp, maxHp, team, role, status, id, cellSize, isSpotted, su
       if (role === 'SNIPER') { g.drawCircle(0, 0, radius * 0.5); g.moveTo(-radius, 0); g.lineTo(radius, 0); g.moveTo(0, -radius); g.lineTo(0, radius); } 
       else if (role === 'MEDIC') { g.moveTo(0, -radius*0.6); g.lineTo(0, radius*0.6); g.moveTo(-radius*0.6, 0); g.lineTo(radius*0.6, 0); } 
       else if (role === 'LEADER') { g.drawPolygon([-radius*0.4, 0, 0, -radius*0.8, radius*0.4, 0, 0, radius*0.8]); }
-      else if (role === 'HEAVY') { g.drawRect(-radius*0.5, -radius*0.5, radius, radius); } // HEAVY square icon
+      else if (role === 'HEAVY') { g.drawRect(-radius*0.5, -radius*0.5, radius, radius); }
 
       const hpW = cellSize; const hpH = cellSize * 0.15; const hpY = -radius - hpH - 2;
       g.beginFill(0x000000); g.drawRect(-hpW/2, hpY, hpW, hpH); g.endFill();
@@ -123,7 +141,14 @@ export default function TacticalViewport({ units, attacks, obstacles, floatingTe
       <Container sortableChildren={true}>
         <MoveLines lines={moveLines} cellSize={cellSize} />
         {units.map((u: any) => (
-          <Unit key={u.id} {...u} cellSize={cellSize} zIndex={10} isSpotted={spottedUnits.has(u.id)} />
+          <Unit 
+            key={u.id} 
+            {...u} 
+            cellSize={cellSize} 
+            zIndex={10} 
+            isSpotted={spottedUnits.has(u.id)} 
+            suppression={u.suppression}
+          />
         ))}
         <LaserEffects attacks={attacks} cellSize={cellSize} />
         <ImpactSparks attacks={attacks} cellSize={cellSize} /> 

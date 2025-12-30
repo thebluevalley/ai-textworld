@@ -4,51 +4,59 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 export async function POST(req: Request) {
   const { units, obstacles, mapSize } = await req.json();
 
-  const systemPrompt = `You are a VETERAN SQUAD LEADER. Map: ${mapSize}x${mapSize}.
+  // 1. 战术分组 (Fire Teams)
+  // Alpha: 灵活机动 (Leader, Medic, Assault 1)
+  // Bravo: 重火力压制 (Heavy, Sniper)
+  const alphaIds = units.filter((u:any) => ['LEADER', 'MEDIC', 'ASSAULT'].includes(u.role)).map((u:any) => u.id);
+  const bravoIds = units.filter((u:any) => ['HEAVY', 'SNIPER'].includes(u.role)).map((u:any) => u.id);
+
+  const systemPrompt = `You are a MILITARY TACTICAL AI (USMC Doctrine). Map: ${mapSize}x${mapSize}.
   
-  CRITICAL RULES (LOGIC & PHYSICS):
-  1. 🧱 NO WALL-HACKS: Bullets CANNOT pass through walls. If target is behind a wall, you MUST FLANK (move around). Do not shoot the wall.
-  2. 🚑 SURVIVAL FIRST: 
-     - If HP < 350: STOP ATTACKING. RUN to cover immediately. Call for Medic.
-     - THOUGHT: "Hit hard! Falling back!", "Need Medic!", "Taking Cover!"
+  ORGANIZATION:
+  - **Team Alpha (Maneuver):** Leader, Medic, Assault. (Fast, Flanking, CQB)
+  - **Team Bravo (Base of Fire):** Heavy, Sniper. (Suppression, Overwatch)
   
-  SQUAD ROLES & TACTICS:
-  - 🛡️ HEAVY (New): High suppression. Find a choke point and spray. 
-  - ⚔️ ASSAULT: Flank around obstacles. Close distance.
-  - 🔭 SNIPER: Stay far back. Watch long corridors.
-  - ➕ MEDIC: Stay safe. Move to wounded allies (HP<500).
+  TACTICAL DOCTRINE (Choose one per turn):
+  1. 🏃 **BOUNDING OVERWATCH (Advance):**
+     - Bravo STOPS and uses "SUPPRESS" tactic on enemies.
+     - Alpha uses "RUSH" tactic to move to next cover.
+  2. 🛡️ **PEELING (Retreat):**
+     - If Squad HP < 40%, Low HP units "RETREAT".
+     - High HP units "COVER_FIRE" to pin enemies down.
+  3. 🚑 **CASEVAC (Rescue):**
+     - If unit Critical (<300 HP): Medic uses "RESCUE".
+     - Heavy/Sniper MUST use "SUPPRESS" on nearest enemy to cover the Medic.
+  4. ⚔️ **LSH (Linear Ambush):**
+     - If enemies in open: All units "FOCUS_FIRE".
   
-  DECISION TREE:
-  1. Is anyone Critically Wounded (<300 HP)? -> Medic MOVE to them. Wounded unit MOVE to Medic/Cover.
-  2. Is Enemy in Line of Sight? -> ATTACK.
-  3. Is Enemy behind wall? -> FLANK (Move to side).
+  AVAILABLE TACTICS (Output in 'tactic' field):
+  - "RUSH": Double move speed, NO shooting (Sprinting).
+  - "SUPPRESS": Zero movement, Double fire rate, Lower accuracy (Pinning enemy).
+  - "COVER_FIRE": Normal move, Normal shoot.
+  - "RETREAT": Move away from enemy, reduced shooting.
+  - "RESCUE": Medic only. Move to low HP ally.
   
-  Example:
+  Output Example:
   {
     "actions": [
-      { "unitId": "b1", "type": "MOVE", "target": {"x": 8, "y": 12}, "thought": "Flanking left" },
-      { "unitId": "r_heavy", "type": "MOVE", "target": {"x": 25, "y": 25}, "thought": "Setting up MG" }
+      { "unitId": "b_heavy", "type": "MOVE", "target": {"x": 5, "y": 5}, "tactic": "SUPPRESS", "thought": "Laying hate!" },
+      { "unitId": "b_leader", "type": "MOVE", "target": {"x": 10, "y": 10}, "tactic": "RUSH", "thought": "Bounding forward!" }
     ]
   }
   `;
 
+  // 数据预处理
   const promptData = units.map((u: any) => ({
-    id: u.id, 
-    team: u.team, 
-    role: u.role,
-    pos: u.pos || {x: u.x, y: u.y}, 
-    hp: u.hp, 
-    // 告诉 AI 是否安全（旁边有没有掩体）
-    nearCover: obstacles.some((o:any) => Math.abs(u.pos.x - o.x) < 2 && Math.abs(u.pos.y - o.y) < 2)
+    id: u.id, team: u.team, role: u.role, pos: u.pos || {x: u.x, y: u.y}, hp: u.hp, 
+    isSuppressed: (u.suppression || 0) > 50,
+    fireTeam: alphaIds.includes(u.id) ? 'ALPHA' : 'BRAVO'
   }));
 
-  const simplifiedObstacles = obstacles.map((o:any) => ({ 
-    x: Math.round(o.x + o.w/2), y: Math.round(o.y + o.h/2) 
-  }));
+  const simplifiedObstacles = obstacles.map((o:any) => ({ x: Math.round(o.x+o.w/2), y: Math.round(o.y+o.h/2) }));
 
   const userPrompt = JSON.stringify({
     squad_status: promptData,
-    obstacles_center: simplifiedObstacles.slice(0, 5)
+    cover_points: simplifiedObstacles.slice(0, 6)
   });
 
   const result = await AIDispatcher.chatCompletion({
@@ -61,9 +69,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ actions: [] }, { status: 429 });
   }
 
-  if (!result || !result.actions) {
-    return NextResponse.json({ actions: [] });
-  }
-
-  return NextResponse.json(result);
+  return NextResponse.json(result || { actions: [] });
 }
