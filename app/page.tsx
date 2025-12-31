@@ -1,356 +1,273 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import dynamic from 'next/dynamic';
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Shield, Crosshair, Trophy, Skull, Users, HeartPulse, Zap } from 'lucide-react';
+import { Play, Pause, Terminal, Activity, AlertTriangle, ShieldAlert, Cpu, HeartPulse, Brain, Skull } from 'lucide-react';
 
-const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
+// === 初始游戏状态 ===
+const INITIAL_STATE = {
+  tickCount: 0,
+  isPlaying: false,
+  isWaitingForDecision: false, // 决策锁
+  
+  // 飞船状态
+  shipStatus: {
+    hull: 100,
+    oxygen: 98,
+    danger: 10, // 危机值
+  },
 
-const BASE_SPEED = 0.008; 
-const MAP_SIZE = 30;
+  // 船员名单 (带有人设)
+  crew: [
+    { name: 'Capt. Miller', role: 'Commander', status: 'ALIVE', hp: 100, sanity: 90, location: 'BRIDGE', traits: 'Stoic, Decisive' },
+    { name: 'Dr. Chen', role: 'Scientist', status: 'ALIVE', hp: 80, sanity: 95, location: 'LAB', traits: 'Curious, Cold' },
+    { name: 'Eng. Isaac', role: 'Engineer', status: 'ALIVE', hp: 90, sanity: 60, location: 'ENGINE', traits: 'Anxious, Skilled' },
+    { name: 'Sgt. Vance', role: 'Security', status: 'ALIVE', hp: 120, sanity: 80, location: 'ARMORY', traits: 'Aggressive, Loyal' },
+    { name: 'Unit 734', role: 'Android', status: 'ALIVE', hp: 200, sanity: 100, location: 'HALLWAY', traits: 'Robotic, Obedient' },
+  ],
 
-// === ⚔️ 武器参数 ===
-const WEAPON_STATS: any = {
-  SNIPER:  { range: 30, damage: 120, cooldown: 3500, accuracy: 0.95, suppression: 80 }, 
-  ASSAULT: { range: 10, damage: 20,  cooldown: 500,  accuracy: 0.75, suppression: 15 }, 
-  LEADER:  { range: 15, damage: 35,  cooldown: 1000, accuracy: 0.85, suppression: 30 },
-  MEDIC:   { range: 8,  damage: 15,  cooldown: 800,  accuracy: 0.70, suppression: 10 },
-  HEAVY:   { range: 20, damage: 25,  cooldown: 300,  accuracy: 0.50, suppression: 60 },
+  // 历史日志 (记忆核心)
+  eventLog: [
+    "SYSTEM: Protocol Zero Initiated.",
+    "SYSTEM: Day 42. Deep space silence.",
+    "SYSTEM: Bio-scan active. All crew signs normal."
+  ] as string[],
+
+  // 当前待处理的决策
+  currentDecision: null as any
 };
 
-const OBSTACLES = [
-  { x: 14, y: 10, w: 2, h: 10 }, { x: 10, y: 14, w: 10, h: 2 },
-  { x: 5, y: 5, w: 6, h: 6 },    { x: 19, y: 19, w: 6, h: 6 },
-  { x: 2, y: 18, w: 5, h: 1 },   { x: 23, y: 11, w: 5, h: 1 },
-];
-
-const INITIAL_UNITS = [
-  // BLUE
-  { id: 'b1', team: 'BLUE', role: 'LEADER', x: 4, y: 12, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'b2', team: 'BLUE', role: 'SNIPER', x: 2, y: 2, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'b3', team: 'BLUE', role: 'MEDIC', x: 3, y: 4, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'b4', team: 'BLUE', role: 'ASSAULT', x: 11, y: 4, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'b5', team: 'BLUE', role: 'HEAVY', x: 5, y: 10, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  // RED
-  { id: 'r1', team: 'RED', role: 'LEADER', x: 26, y: 18, hp: 1000, maxHp: 1000, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'r2', team: 'RED', role: 'SNIPER', x: 28, y: 28, hp: 600, maxHp: 600, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'r3', team: 'RED', role: 'MEDIC', x: 26, y: 26, hp: 800, maxHp: 800, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'r4', team: 'RED', role: 'ASSAULT', x: 19, y: 26, hp: 900, maxHp: 900, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-  { id: 'r5', team: 'RED', role: 'HEAVY', x: 24, y: 20, hp: 1200, maxHp: 1200, status: 'ALIVE', lastShot: 0, kills: 0, suppression: 0, tactic: 'MOVE', lastMoveTime: 0 },
-];
-
 export default function Home() {
-  const [units, setUnits] = useState(INITIAL_UNITS);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [attacks, setAttacks] = useState<any[]>([]);
-  const [floatingTexts, setFloatingTexts] = useState<any[]>([]); 
-  const [thoughts, setThoughts] = useState<any[]>([]);
-  const [moveLines, setMoveLines] = useState<any[]>([]);
-  const [netStatus, setNetStatus] = useState<'IDLE' | 'SENDING' | 'COOLING'>('IDLE');
-  const [spottedUnits, setSpottedUnits] = useState<Set<string>>(new Set());
-  
-  const targetsRef = useRef<Record<string, {x: number, y: number}>>({});
-  const unitsRef = useRef(units); 
+  const [gameState, setGameState] = useState(INITIAL_STATE);
+  const [logs, setLogs] = useState<string[]>(INITIAL_STATE.eventLog);
+  const [netStatus, setNetStatus] = useState<'IDLE' | 'THINKING'>('IDLE');
+  const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => { unitsRef.current = units; }, [units]);
-  useEffect(() => { units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y }); }, []);
-
-  // 物理检测函数
-  const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
-    const rx = rect.x + 0.05; const ry = rect.y + 0.05; const rw = rect.w - 0.1; const rh = rect.h - 0.1;
-    const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
-    const minY = Math.min(p1.y, p2.y); const maxY = Math.max(p1.y, p2.y);
-    if (rx > maxX || rx + rw < minX || ry > maxY || ry + rh < minY) return false;
-    const steps = 15;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps; const px = p1.x + (p2.x - p1.x) * t; const py = p1.y + (p2.y - p1.y) * t;
-      if (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh) return true;
-    }
-    return false;
-  };
-  const checkLineOfSight = (u1: any, u2: any) => {
-    for (const obs of OBSTACLES) if (lineIntersectsRect(u1, u2, obs)) return false;
-    return true;
-  };
-  const isColliding = (x: number, y: number) => {
-    for (const obs of OBSTACLES) if (x > obs.x - 0.1 && x < obs.x + obs.w + 0.1 && y > obs.y - 0.1 && y < obs.y + obs.h + 0.1) return true;
-    return false;
-  };
-
-  // === ⚡️ 战斗反射循环 ===
+  // 自动滚动日志
   useEffect(() => {
-    if (!isPlaying) return;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs]);
 
-    const reflexInterval = setInterval(() => {
-      const currentUnits = unitsRef.current;
-      const now = Date.now();
-      const newAttacks: any[] = [];
-      const newTexts: any[] = [];
-      let hasUpdates = false;
-      const nextUnits = currentUnits.map(u => ({ ...u }));
-      const currentlySpotted = new Set<string>();
-
-      nextUnits.forEach(attacker => {
-        if (attacker.status === 'DEAD') return;
-        let canSeeAnyone = false;
-        
-        const baseStats = WEAPON_STATS[attacker.role] || WEAPON_STATS['ASSAULT'];
-        let currentCooldown = baseStats.cooldown;
-        let currentAccuracy = baseStats.accuracy;
-        let suppressionPower = baseStats.suppression;
-
-        if (attacker.tactic === 'RUSH') return; 
-        if (attacker.tactic === 'SUPPRESS') {
-           currentCooldown *= 0.4; currentAccuracy *= 0.4; suppressionPower *= 1.5;
-        }
-        const isSuppressed = (attacker.suppression || 0) > 50;
-        if (isSuppressed) { currentCooldown *= 1.5; currentAccuracy *= 0.5; }
-
-        let bestTarget: any = null;
-        let minDist = Infinity;
-
-        nextUnits.forEach(target => {
-          if (target.team === attacker.team || target.status === 'DEAD') return;
-          const dist = Math.sqrt(Math.pow(attacker.x - target.x, 2) + Math.pow(attacker.y - target.y, 2));
-          
-          if (dist < 35 && checkLineOfSight(attacker, target)) {
-             currentlySpotted.add(target.id);
-             canSeeAnyone = true;
-             
-             if (now - (attacker.lastShot || 0) >= currentCooldown) {
-               if (dist <= baseStats.range) {
-                 if (dist < minDist) { minDist = dist; bestTarget = target; }
-               }
-             }
-          }
-        });
-
-        if (attacker.tactic === 'SUPPRESS' && !canSeeAnyone) {
-           attacker.tactic = 'MOVE';
-        }
-
-        if (bestTarget) {
-          attacker.lastShot = now;
-          hasUpdates = true;
-          const isHit = Math.random() < currentAccuracy;
-          
-          newAttacks.push({
-            from: { x: attacker.x, y: attacker.y },
-            to: { x: bestTarget.x, y: bestTarget.y },
-            color: attacker.team === 'BLUE' ? 0x60a5fa : 0xf87171,
-            isMiss: !isHit,
-            timestamp: now,
-            isSuppressionFire: isSuppressed || attacker.tactic === 'SUPPRESS' 
-          });
-
-          bestTarget.suppression = Math.min(100, (bestTarget.suppression || 0) + suppressionPower);
-
-          if (isHit) {
-            let dmg = baseStats.damage;
-            if (Math.random() > 0.9) dmg = Math.floor(dmg * 2.0); 
-            bestTarget.hp = Math.max(0, bestTarget.hp - dmg);
-            if (bestTarget.hp === 0 && bestTarget.status !== 'DEAD') {
-               bestTarget.status = 'DEAD';
-               attacker.kills = (attacker.kills || 0) + 1;
-               newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: "KIA", color: "#ff0000", life: 90, id: Math.random() });
-            } else {
-               newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: `-${dmg}`, color: "#fff", life: 60, id: Math.random() });
-            }
-          } else {
-            if (attacker.tactic === 'SUPPRESS' && Math.random()>0.7) {
-                newTexts.push({ x: bestTarget.x, y: bestTarget.y, text: "SUPPRESSED", color: "#fbbf24", life: 40, id: Math.random() });
-            }
-          }
-        }
-      });
-
-      nextUnits.forEach(u => {
-        if (u.suppression > 0) u.suppression = Math.max(0, u.suppression - 2); 
-      });
-
-      setSpottedUnits(currentlySpotted);
-
-      if (hasUpdates || nextUnits.some(u => u.suppression > 0)) {
-        setUnits(nextUnits);
-      }
-      if (newAttacks.length > 0) setAttacks(prev => [...newAttacks, ...prev].slice(0, 30));
-      if (newTexts.length > 0) setFloatingTexts(prev => [...prev, ...newTexts]);
-
-    }, 200);
-
-    return () => clearInterval(reflexInterval);
-  }, [isPlaying]);
-
-  // === AI 循环 ===
-  const runAiLoop = async () => {
-    if (!isPlaying) return;
-    setNetStatus('SENDING');
-    const now = Date.now();
-    const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => ({
-        id: u.id, 
-        team: u.team, 
-        role: u.role, 
-        pos: {x: u.x, y: u.y}, 
-        hp: u.hp, 
-        suppression: u.suppression, 
-        visibleEnemies: [] as any[] // ⚡️ 修复：这里强制转为 any[] 避免类型报错
-    }));
+  // === 核心循环：叙事生成 ===
+  const runGameLoop = async () => {
+    if (!gameState.isPlaying || gameState.isWaitingForDecision) return;
     
-    // 补充视野数据：前端计算并传给后端
-    activeUnits.forEach(u => {
-       const visible = units.filter(t => t.team !== u.team && t.status === 'ALIVE').filter(t => {
-          const dist = Math.sqrt(Math.pow(u.pos.x - t.x, 2) + Math.pow(u.pos.y - t.y, 2));
-          return dist < 35 && checkLineOfSight({x:u.pos.x, y:u.pos.y}, t);
-       }).map(t => ({id: t.id, pos: {x: t.x, y: t.y}, hp: t.hp, role: t.role}));
-       u.visibleEnemies = visible;
-    });
+    setNetStatus('THINKING');
 
     try {
       const res = await fetch('/api/game-tick', {
         method: 'POST',
-        body: JSON.stringify({ units: activeUnits, obstacles: OBSTACLES, mapSize: MAP_SIZE })
+        body: JSON.stringify({ gameState: { ...gameState, eventLog: logs } }) // 把记忆发给 AI
       });
-      if (res.status === 429) { setNetStatus('COOLING'); timerRef.current = setTimeout(runAiLoop, 10000); return; }
+
+      if (res.status === 429) {
+        timerRef.current = setTimeout(runGameLoop, 5000);
+        return;
+      }
+
       if (res.ok) {
-        setNetStatus('IDLE');
         const data = await res.json();
-        if (data.actions) {
-          const newThoughts: any[] = [];
-          const newMoveLines: any[] = [];
-          data.actions.forEach((a: any) => {
-            const actor = units.find(u => u.id === a.unitId);
-            if (!actor || actor.status === 'DEAD') return;
-            setUnits(prev => prev.map(u => u.id === a.unitId ? { ...u, tactic: a.tactic, lastMoveTime: now } : u));
-            if (a.thought) newThoughts.push({ x: actor.x, y: actor.y, text: a.thought, team: actor.team, id: Math.random() });
-            if (a.type === 'MOVE' && a.target) {
-              const tx = Math.max(1, Math.min(MAP_SIZE-1, a.target.x));
-              const ty = Math.max(1, Math.min(MAP_SIZE-1, a.target.y));
-              targetsRef.current[a.unitId] = { x: tx, y: ty };
-              newMoveLines.push({ from: {x: actor.x, y: actor.y}, to: {x: tx, y: ty}, color: actor.team === 'BLUE' ? 0x60a5fa : 0xf87171, tactic: a.tactic });
-            }
-          });
-          setThoughts(newThoughts);
-          setMoveLines(newMoveLines);
+        
+        // 1. 处理状态更新 (State Updates)
+        const updates = data.stateUpdates || {};
+        const newCrew = gameState.crew.map(member => {
+          const memberUpdate = updates.crewUpdates?.find((u:any) => u.name === member.name);
+          if (memberUpdate) {
+            // 合并属性，处理死亡逻辑
+            const newHp = memberUpdate.hp !== undefined ? member.hp + memberUpdate.hp : member.hp;
+            const newSanity = memberUpdate.sanity !== undefined ? member.sanity + memberUpdate.sanity : member.sanity;
+            const newStatus = newHp <= 0 ? 'DEAD' : (memberUpdate.status || member.status);
+            return { ...member, ...memberUpdate, hp: newHp, sanity: newSanity, status: newStatus };
+          }
+          return member;
+        });
+
+        const newShipStatus = {
+          hull: Math.max(0, gameState.shipStatus.hull + (updates.hull || 0)),
+          oxygen: Math.max(0, gameState.shipStatus.oxygen + (updates.oxygen || 0)),
+          danger: Math.max(0, Math.min(100, gameState.shipStatus.danger + (updates.danger || 0))),
+        };
+
+        // 2. 处理日志和对话
+        const newLogEntries: string[] = [];
+        if (data.narrative) newLogEntries.push(`> ${data.narrative}`);
+        if (data.dialogues) {
+          data.dialogues.forEach((d:any) => newLogEntries.push(`[${d.name}]: "${d.text}"`));
         }
-        timerRef.current = setTimeout(runAiLoop, 3000);
-      } else { timerRef.current = setTimeout(runAiLoop, 5000); }
-    } catch (e) { console.error(e); timerRef.current = setTimeout(runAiLoop, 5000); }
+
+        // 3. 检查是否需要玩家决策
+        const decision = data.decision;
+        const isDecisionRequired = decision && decision.required;
+
+        setLogs(prev => [...prev, ...newLogEntries]);
+        setGameState(prev => ({
+          ...prev,
+          crew: newCrew,
+          shipStatus: newShipStatus,
+          isWaitingForDecision: isDecisionRequired,
+          currentDecision: decision,
+          tickCount: prev.tickCount + 1
+        }));
+
+        setNetStatus('IDLE');
+
+        // 如果不需要决策，继续循环；如果需要，暂停等待
+        if (!isDecisionRequired) {
+          timerRef.current = setTimeout(runGameLoop, 6000); // 6秒一回合，阅读时间
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      timerRef.current = setTimeout(runGameLoop, 5000);
+    }
+  };
+
+  // 玩家做出选择
+  const handleChoice = (option: any) => {
+    // 将玩家的选择写入日志，作为新的“记忆”
+    const choiceLog = `:: OVERSEER COMMAND :: ${option.text}`;
+    setLogs(prev => [...prev, choiceLog]);
+    
+    // 恢复运行
+    setGameState(prev => ({
+      ...prev,
+      isWaitingForDecision: false,
+      currentDecision: null
+    }));
+    
+    // 立即触发下一轮，让 AI 反应玩家的决定
+    setTimeout(runGameLoop, 500); 
   };
 
   useEffect(() => {
-    if (isPlaying) { runAiLoop(); } else { if (timerRef.current) clearTimeout(timerRef.current); setNetStatus('IDLE'); }
+    if (gameState.isPlaying && !gameState.isWaitingForDecision) {
+      runGameLoop();
+    } else {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    }
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isPlaying]);
+  }, [gameState.isPlaying, gameState.isWaitingForDecision]);
 
-  // 动画循环
-  useEffect(() => {
-    let frame: number;
-    const animate = () => {
-      setUnits(prev => prev.map(u => {
-        if (u.status === 'DEAD') return u;
-        const target = targetsRef.current[u.id];
-        let tx = target ? target.x : MAP_SIZE/2;
-        let ty = target ? target.y : MAP_SIZE/2;
-        if (!target) {
-           const distToCenter = Math.sqrt(Math.pow(u.x - 15, 2) + Math.pow(u.y - 15, 2));
-           if (distToCenter > 10) { tx = 15; ty = 15; } else { tx = u.x; ty = u.y; }
-        } else { tx = target.x; ty = target.y; }
-        const dx = tx - u.x; const dy = ty - u.y;
-        if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return { ...u, x: tx, y: ty };
-        let speed = BASE_SPEED;
-        if (u.tactic === 'RUSH') speed *= 1.8;
-        if (u.tactic === 'SUPPRESS') speed = 0; 
-        if ((u.suppression || 0) > 50) speed *= 0.5;
-        if (!target) speed *= 0.1;
-        let newX = u.x + dx * speed; let newY = u.y + dy * speed;
-        if (isColliding(newX, newY)) {
-           if (!isColliding(newX, u.y)) newY = u.y; else if (!isColliding(u.x, newY)) newX = u.x; else return u;
-        }
-        return { ...u, x: newX, y: newY };
-      }));
-      setFloatingTexts(prev => prev.map(t => ({ ...t, life: t.life - 1 })).filter(t => t.life > 0));
-      frame = requestAnimationFrame(animate);
-    };
-    if (isPlaying) frame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frame);
-  }, [isPlaying]);
-
+  // === UI 渲染 ===
   return (
-    <main className="flex h-screen w-full bg-[#020617] text-slate-300 font-sans overflow-hidden">
-      <div className="flex-1 relative flex flex-col">
-        <div className="h-14 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-6 z-20">
-          <h1 className="text-lg font-bold text-white flex items-center gap-2">
-            <Shield className="text-emerald-500" />
-            TACTICAL OPS <span className="text-[10px] bg-emerald-900 px-2 rounded">ADVANCED DOCTRINE</span>
-            {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI COMMANDING</span>}
-          </h1>
-          <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
-            {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START"}
-          </button>
+    <main className="flex h-screen w-full bg-black text-green-500 font-mono overflow-hidden relative">
+      
+      {/* 扫描线特效层 */}
+      <div className="absolute inset-0 pointer-events-none z-50 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-20" />
+
+      {/* 左侧：数据监视器 */}
+      <div className="w-1/3 border-r border-green-900 p-6 flex flex-col gap-6 bg-black/90 z-10">
+        <div className="flex items-center gap-2 border-b border-green-800 pb-4">
+          <Terminal size={24} />
+          <h1 className="text-xl font-bold tracking-widest">PROTOCOL: OVERSEER</h1>
+          {netStatus === 'THINKING' && <span className="animate-pulse text-xs bg-green-900 px-2 py-0.5 rounded">PROCESSING</span>}
         </div>
-        <div className="flex-1 bg-[#020617] relative flex items-center justify-center p-4">
-           <div className="border border-slate-800 shadow-2xl relative">
-             <TacticalViewport units={units} attacks={attacks} obstacles={OBSTACLES} floatingTexts={floatingTexts} thoughts={thoughts} moveLines={moveLines} spottedUnits={spottedUnits} mapSize={MAP_SIZE} />
-           </div>
+
+        {/* 飞船状态 */}
+        <div className="space-y-4">
+          <h2 className="text-sm text-green-700 font-bold mb-2">SHIP INTEGRITY</h2>
+          <div className="flex justify-between items-center">
+            <span>HULL</span>
+            <div className="w-48 h-3 bg-green-900/30 border border-green-800">
+              <div className="h-full bg-green-600" style={{width: `${gameState.shipStatus.hull}%`}}></div>
+            </div>
+          </div>
+          <div className="flex justify-between items-center">
+            <span>O2 LEVEL</span>
+            <div className="w-48 h-3 bg-green-900/30 border border-green-800">
+              <div className="h-full bg-cyan-600" style={{width: `${gameState.shipStatus.oxygen}%`}}></div>
+            </div>
+          </div>
+          <div className="flex justify-between items-center text-red-500">
+            <span className="flex items-center gap-2"><AlertTriangle size={14}/> THREAT</span>
+            <div className="w-48 h-3 bg-red-900/30 border border-red-800">
+              <div className="h-full bg-red-600" style={{width: `${gameState.shipStatus.danger}%`}}></div>
+            </div>
+          </div>
+        </div>
+
+        {/* 船员状态卡片 */}
+        <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+          <h2 className="text-sm text-green-700 font-bold mb-2">CREW VITALS</h2>
+          {gameState.crew.map((c) => (
+            <div key={c.name} className={`border p-3 flex flex-col gap-1 transition-all ${c.status === 'DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-green-800 bg-green-900/10'}`}>
+              <div className="flex justify-between items-center">
+                <span className="font-bold flex items-center gap-2">
+                  {c.status === 'DEAD' ? <Skull size={14}/> : <Users size={14}/>} {c.name}
+                </span>
+                <span className="text-xs bg-green-900 px-1">{c.role}</span>
+              </div>
+              <div className="flex justify-between text-xs text-green-600 mt-1">
+                <span className="flex items-center gap-1"><HeartPulse size={10}/> HP: {c.hp}</span>
+                <span className="flex items-center gap-1"><Brain size={10}/> SAN: {c.sanity}</span>
+              </div>
+              <div className="text-[10px] text-green-700 mt-1">LOC: {c.location} | {c.status}</div>
+            </div>
+          ))}
+        </div>
+
+        <button 
+          onClick={() => setGameState(prev => ({...prev, isPlaying: !prev.isPlaying}))}
+          className="w-full border border-green-500 py-3 hover:bg-green-500 hover:text-black transition-colors font-bold flex items-center justify-center gap-2"
+        >
+          {gameState.isPlaying ? <Pause size={16}/> : <Play size={16}/>} 
+          {gameState.isPlaying ? "PAUSE SIMULATION" : "INITIATE PROTOCOL"}
+        </button>
+      </div>
+
+      {/* 右侧：剧情日志 (瀑布流) */}
+      <div className="flex-1 p-8 overflow-y-auto font-mono text-lg leading-relaxed relative bg-black" ref={scrollRef}>
+        <div className="space-y-4 pb-32">
+          {logs.map((log, i) => {
+            const isSystem = log.startsWith("SYSTEM") || log.startsWith("::");
+            const isDialogue = log.startsWith("[");
+            const isNarrative = log.startsWith(">");
+            
+            return (
+              <div key={i} className={`
+                ${isSystem ? 'text-green-300 opacity-60 text-sm' : ''}
+                ${isDialogue ? 'text-cyan-400 pl-4 border-l-2 border-cyan-800' : ''}
+                ${isNarrative ? 'text-green-100 italic' : ''}
+                transition-opacity duration-500 animate-in fade-in slide-in-from-bottom-2
+              `}>
+                {log}
+              </div>
+            );
+          })}
+          {netStatus === 'THINKING' && (
+            <div className="text-green-800 animate-pulse">> Generating narrative data stream...</div>
+          )}
         </div>
       </div>
 
-      <div className="w-80 bg-[#0f172a] border-l border-slate-800 flex flex-col z-30">
-        {/* Blue Team */}
-        <div className="flex-1 p-4 border-b border-slate-800 overflow-y-auto">
-           <div className="flex justify-between items-center text-blue-400 font-bold mb-3 pb-1 border-b border-blue-900/50">
-             <span className="flex items-center gap-2"><Users size={16}/> BLUE TEAM</span>
-             <span className="text-xs text-blue-600">ALPHA</span>
-           </div>
-           <div className="space-y-3">
-             {units.filter(u => u.team === 'BLUE').map(u => (
-               <div key={u.id} className={`bg-slate-900 p-2.5 rounded border relative ${u.status==='DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-slate-700'}`}>
-                 <div className="flex justify-between text-xs text-slate-300 mb-1 font-bold">
-                   <span>{u.role} <span className="text-slate-500 text-[10px]">#{u.id}</span></span>
-                   <span className="text-amber-400 flex items-center gap-1"><Trophy size={10}/> {u.kills}</span>
-                 </div>
-                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
-                   <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
-                 </div>
-                 <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden flex justify-between items-center">
-                    <div className="h-full bg-yellow-500 transition-all" style={{ width: `${u.suppression}%` }}/>
-                 </div>
-                 <div className="mt-1 flex justify-between items-center">
-                    <span className="text-[9px] text-slate-500 bg-slate-800 px-1 rounded">{u.tactic || 'IDLE'}</span>
-                    {u.hp < 350 && u.status !== 'DEAD' && <HeartPulse size={12} className="text-red-500 animate-pulse"/>}
-                 </div>
-               </div>
-             ))}
-           </div>
+      {/* ⚠️ 决策弹窗 (Overlay) */}
+      {gameState.isWaitingForDecision && gameState.currentDecision && (
+        <div className="absolute inset-0 bg-black/80 z-40 flex items-center justify-center p-20 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="border-2 border-red-600 bg-black max-w-2xl w-full p-8 shadow-[0_0_50px_rgba(220,38,38,0.3)]">
+            <div className="flex items-center gap-3 text-red-500 mb-4 border-b border-red-900 pb-4">
+              <ShieldAlert size={32} className="animate-pulse"/>
+              <h2 className="text-2xl font-bold tracking-tighter">CRITICAL DECISION REQUIRED</h2>
+            </div>
+            <h3 className="text-xl text-white mb-2">{gameState.currentDecision.title}</h3>
+            <p className="text-red-300 mb-8 text-lg">{gameState.currentDecision.description}</p>
+            
+            <div className="grid gap-4">
+              {gameState.currentDecision.options.map((opt: any) => (
+                <button 
+                  key={opt.id}
+                  onClick={() => handleChoice(opt)}
+                  className="text-left border border-red-800 p-4 hover:bg-red-900/50 hover:border-red-500 hover:text-white transition-all group"
+                >
+                  <span className="font-bold text-red-500 group-hover:text-white mr-3">[{opt.id}]</span>
+                  {opt.text}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        {/* Red Team */}
-        <div className="flex-1 p-4 overflow-y-auto">
-           <div className="flex justify-between items-center text-red-400 font-bold mb-3 pb-1 border-b border-red-900/50">
-             <span className="flex items-center gap-2"><Users size={16}/> RED TEAM</span>
-             <span className="text-xs text-red-600">BRAVO</span>
-           </div>
-           <div className="space-y-3">
-             {units.filter(u => u.team === 'RED').map(u => (
-               <div key={u.id} className={`bg-slate-900 p-2.5 rounded border relative ${u.status==='DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-slate-700'}`}>
-                 <div className="flex justify-between text-xs text-slate-300 mb-1 font-bold">
-                   <span>{u.role} <span className="text-slate-500 text-[10px]">#{u.id}</span></span>
-                   <span className="text-amber-400 flex items-center gap-1"><Trophy size={10}/> {u.kills}</span>
-                 </div>
-                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
-                   <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${(u.hp/u.maxHp)*100}%` }}/>
-                 </div>
-                 <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-yellow-500 transition-all" style={{ width: `${u.suppression}%` }}/>
-                 </div>
-                 <div className="mt-1 flex justify-between items-center">
-                    <span className="text-[9px] text-slate-500 bg-slate-800 px-1 rounded">{u.tactic || 'IDLE'}</span>
-                    {u.hp < 350 && u.status !== 'DEAD' && <HeartPulse size={12} className="text-red-500 animate-pulse"/>}
-                 </div>
-               </div>
-             ))}
-           </div>
-        </div>
-      </div>
+      )}
+
     </main>
   );
 }
