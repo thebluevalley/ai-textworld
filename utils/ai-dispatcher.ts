@@ -25,7 +25,7 @@ export class AIDispatcher {
     if (role === 'GREEN' && attempt === 0) {
       return {
         apiKey: process.env.VOLCENGINE_KEY || '',
-        // ⚡️ 修复：确保这里是纯 URL 字符串，没有 Markdown 格式
+        // 确保是纯 URL
         endpoint: process.env.VOLCENGINE_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
         model: process.env.VOLCENGINE_MODEL || 'doubao-pro-32k',
         provider: 'VOLC'
@@ -37,7 +37,7 @@ export class AIDispatcher {
     
     return {
       apiKey: siliconPool[keyIndex] || '',
-      // ⚡️ 修复：移除 [url](url) 格式，只保留纯 URL
+      // 确保是纯 URL
       endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
       model: 'Qwen/Qwen2.5-7B-Instruct',
       provider: 'SILICON'
@@ -60,8 +60,6 @@ export class AIDispatcher {
     }
 
     try {
-      // console.log(`[AI Request] ${role} -> ${config.provider} (${config.model})`);
-
       const response = await fetch(config.endpoint, {
         method: 'POST',
         headers: {
@@ -88,7 +86,7 @@ export class AIDispatcher {
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // === JSON 提取与修复 ===
+      // === 🛡️ 终极 JSON 清洗与提取 ===
       const jsonBlockMatch = content.match(/```json([\s\S]*?)```/i);
       let jsonString = jsonBlockMatch ? jsonBlockMatch[1] : content;
       
@@ -97,15 +95,20 @@ export class AIDispatcher {
       if (firstBrace !== -1 && lastBrace !== -1) {
         jsonString = jsonString.substring(firstBrace, lastBrace + 1);
         
-        // 修复常见 JSON 语法错误
+        // 1. 修复末尾多余逗号
         jsonString = jsonString.replace(/,\s*}/g, '}'); 
-        // 移除数字前的 '+' 号
+        
+        // 2. 移除数字前的 '+' 号
         jsonString = jsonString.replace(/:\s*\+(\d+)/g, ': $1');
+        
+        // 3. ⚡️ 核心修复：将中文引号 “ ” 替换为英文引号 "
+        jsonString = jsonString.replace(/[“”]/g, '"');
 
         try {
           return JSON.parse(jsonString);
         } catch (e) {
           console.error(`[AI Parse Error] ${role}`, content);
+          // 解析失败重试一次
           if (retryCount < 1) return this.chatCompletion({ ...options, retryCount: retryCount + 1 });
           return null;
         }
