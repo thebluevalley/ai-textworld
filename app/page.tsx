@@ -3,10 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Cpu, Zap, Radio, Rocket, Crosshair,  // Tech Icons
   Scroll, Sparkles, Flame, Moon, BookOpen, // Magic Icons
-  Swords, Skull, AlertTriangle, Activity, History, Globe
+  Swords, AlertTriangle, Activity, Globe, History, TrendingUp, Users
 } from 'lucide-react';
 
-// === 初始状态 ===
+// === 初始状态 (对应 Tech vs Magic) ===
 const INITIAL_STATE = {
   tickCount: 0,
   environment: { 
@@ -58,6 +58,7 @@ export default function Home() {
     setNetStatus('SIMULATING');
 
     try {
+      // 这里的 API 调用逻辑保持不变，确保后端返回的是 Tech/Magic 数据
       const res = await fetch('/api/game-tick', {
         method: 'POST',
         body: JSON.stringify({ gameState: { ...gameState, eventLog: logs.slice(0, 10).map(l => l.text) } })
@@ -89,7 +90,7 @@ export default function Home() {
         const newSpecA = updateCiv(gameState.speciesA, upA, data.redAction);
         const newSpecB = updateCiv(gameState.speciesB, upB, data.blueAction);
 
-        // === 生成日志 ===
+        // === 生成日志 (倒序插入) ===
         const newEntries: LogEntry[] = [];
         
         if (globalEvent.type !== 'NONE') {
@@ -115,7 +116,7 @@ export default function Home() {
            });
        }
 
-        // 科技/魔法突破
+        // 突破日志
         if (upA.newTrait) newEntries.push({ type: 'TECH', text: `💡 [科技突破] 研发成功: ${upA.newTrait}`, changes: null });
         if (upB.newTrait) newEntries.push({ type: 'MAGIC', text: `✨ [魔法领悟] 习得禁咒: ${upB.newTrait}`, changes: null });
 
@@ -149,174 +150,214 @@ export default function Home() {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  // 辅助组件：数值变化
+  // 组件：数值药丸
   const StatPill = ({ val, type }: { val: number, type: 'POP' | 'RES' }) => {
       if (!val || val === 0) return null;
       const isPos = val > 0;
       return (
-          <span className={`text-[10px] font-bold px-1 rounded ${isPos ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'}`}>
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+              isPos ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'
+          }`}>
+              {type === 'POP' ? <Users size={10}/> : (type === 'RES' ? <TrendingUp size={10}/> : '')}
               {isPos ? '+' : ''}{val}
           </span>
       );
   };
 
+  // 组件：行动徽章
+  const ActionBadge = ({ action, type }: { action: string, type: 'tech' | 'magic' }) => {
+      return (
+          <span className={`text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider ${
+              type === 'tech' 
+              ? 'bg-cyan-50 text-cyan-700 border-cyan-200' 
+              : 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200'
+          }`}>
+              {action}
+          </span>
+      );
+  };
+
   return (
-    <main className="flex h-screen w-full bg-gray-100 font-sans overflow-hidden">
+    <main className="flex flex-col h-screen w-full bg-gray-50 text-slate-800 font-sans overflow-hidden">
       
-      {/* 🔴 左侧：科技文明 (Tech/Cyber) */}
-      <section className="w-1/3 flex flex-col bg-slate-900 text-cyan-50 border-r-4 border-slate-800 shadow-2xl z-10">
-        {/* Header */}
-        <div className="p-6 border-b border-cyan-900 bg-slate-950 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-2 opacity-20"><Cpu size={100} /></div>
-            <h2 className="text-2xl font-mono font-bold text-cyan-400 tracking-tighter uppercase relative z-10 flex items-center gap-2">
-                <Radio className="animate-pulse"/> {gameState.speciesA.name}
-            </h2>
-            <div className="text-[10px] text-cyan-700 font-mono mt-1 tracking-widest">SYSTEM: ONLINE // SINGULARITY_OS</div>
-        </div>
-
-        {/* Dashboard */}
-        <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-            {/* Stats */}
-            <div className="space-y-4">
-                <div className="bg-slate-800/50 p-3 rounded border border-cyan-900/50">
-                    <div className="flex justify-between text-xs font-mono text-cyan-600 mb-1">CITIZENS (人口)</div>
-                    <div className="text-2xl font-mono text-white">{gameState.speciesA.population.toLocaleString()}</div>
-                    <div className="h-1 bg-slate-700 mt-2 rounded-full overflow-hidden"><div className="h-full bg-cyan-500" style={{width: '60%'}}></div></div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded border border-cyan-900/50">
-                    <div className="flex justify-between text-xs font-mono text-cyan-600 mb-1">ENERGY (能源)</div>
-                    <div className="text-2xl font-mono text-amber-400 flex items-center gap-2"><Zap size={16}/> {gameState.speciesA.food.toLocaleString()}</div>
-                    <div className="h-1 bg-slate-700 mt-2 rounded-full overflow-hidden"><div className="h-full bg-amber-500" style={{width: '60%'}}></div></div>
-                </div>
-            </div>
-
-            {/* Tech Tree */}
+      {/* 顶部：世界状态栏 */}
+      <header className="bg-white border-b border-gray-200 p-4 h-16 flex justify-between items-center shadow-sm z-20">
+        <div className="flex items-center gap-3">
+            <div className="p-1.5 bg-slate-100 rounded-lg"><Globe size={20} className="text-slate-600"/></div>
             <div>
-                <h3 className="text-xs font-mono text-slate-500 mb-3 flex items-center gap-2 border-b border-slate-800 pb-1">
-                    <Rocket size={12}/> TECH_TREE_DATABASE
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                    {gameState.speciesA.traits.map((t, i) => (
-                        <span key={i} className="px-2 py-1 bg-cyan-950 text-cyan-300 text-[10px] font-mono border border-cyan-800 rounded-sm">
-                            [{t}]
-                        </span>
-                    ))}
-                </div>
+                <h1 className="text-sm font-black text-slate-900 tracking-wide">CLASH OF REALMS</h1>
+                <div className="text-[10px] text-slate-500 font-medium">Singularity vs Arcane</div>
             </div>
         </div>
+
+        <div className="flex items-center gap-6 px-6 py-1.5 bg-gray-50 rounded-full border border-gray-100">
+             <div className="flex items-center gap-2 font-bold text-slate-700 text-sm">
+                <Activity size={16} className="text-slate-400"/>
+                {gameState.environment.type}
+             </div>
+             <div className="w-px h-4 bg-gray-300"></div>
+             <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400 font-bold uppercase">Mana/Energy Level</span>
+                <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-500" style={{width: `${gameState.environment.resourceLevel * 10}%`}}></div>
+                </div>
+             </div>
+             <div className="w-px h-4 bg-gray-300"></div>
+             <div className="font-mono text-xs font-bold text-slate-500">
+                 EPOCH {gameState.tickCount}
+             </div>
+        </div>
+
+        <div className="w-24 text-right">
+            {netStatus === 'SIMULATING' && <span className="text-xs text-indigo-600 font-medium animate-pulse">推演中...</span>}
+        </div>
+      </header>
+
+      {/* 主体内容区 */}
+      <div className="flex-1 flex overflow-hidden">
         
-        {/* Status Footer */}
-        <div className="p-4 bg-slate-950 border-t border-cyan-900 text-xs font-mono text-cyan-600 flex justify-between">
-            <span>ACTION: {gameState.speciesA.action}</span>
-            <span className="animate-pulse">_CURSOR_ACTIVE</span>
-        </div>
-      </section>
-
-
-      {/* 🟡 中间：位面历史 (Neutral/History) */}
-      <section className="flex-1 flex flex-col bg-gray-50 border-r border-gray-200">
-        {/* Top Bar */}
-        <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm">
-            <div className="flex items-center gap-2 text-slate-700 font-bold">
-                <Globe size={18} className="text-slate-400"/>
-                <span>{gameState.environment.type}</span>
+        {/* 🔴 左侧：科技文明 (Tech - Cyan/Blue Theme) */}
+        <section className="flex-1 p-6 flex flex-col gap-5 border-r border-gray-200 bg-white">
+            <div className="flex justify-between items-start">
+                <div>
+                    <h2 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                        <Cpu className="text-cyan-600"/> {gameState.speciesA.name}
+                    </h2>
+                    <div className="text-[10px] text-cyan-600 font-bold mt-1 tracking-widest uppercase">Type-I Civilization</div>
+                </div>
+                <ActionBadge action={gameState.speciesA.action} type="tech" />
             </div>
-            <div className="flex flex-col items-center">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Timeline</span>
-                <span className="text-xl font-serif font-bold text-slate-800">纪元 {gameState.tickCount}</span>
-            </div>
-            <div className="w-24 text-right">
-                {netStatus === 'SIMULATING' && <Activity size={18} className="text-green-500 animate-pulse inline-block"/>}
-            </div>
-        </div>
 
-        {/* History Feed */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
-            {logs.map((log, i) => (
-                <div key={i} className={`
-                    p-4 rounded-lg border shadow-sm transition-all duration-500
-                    ${log.type === 'NARRATIVE' ? 'bg-white border-gray-200' : ''}
-                    ${log.type === 'DISASTER' ? 'bg-red-50 border-red-200' : ''}
-                    ${log.type === 'TECH' || (log.type === 'BATTLE' && log.changes?.species === 'A') ? 'bg-slate-900 border-cyan-900/50 text-cyan-50 ml-0 mr-12' : ''}
-                    ${log.type === 'MAGIC' || (log.type === 'BATTLE' && log.changes?.species === 'B') ? 'bg-indigo-950 border-purple-900/50 text-purple-50 ml-12 mr-0' : ''}
-                `}>
-                    {/* Header/Icon */}
-                    <div className="flex items-center gap-2 mb-1 opacity-70 text-xs uppercase tracking-wider font-bold">
-                        {log.type === 'TECH' && <Cpu size={12}/>}
-                        {log.type === 'MAGIC' && <Sparkles size={12}/>}
-                        {log.type === 'BATTLE' && <Crosshair size={12}/>}
-                        {log.type === 'DISASTER' && <AlertTriangle size={12}/>}
-                        {log.type === 'NARRATIVE' && <History size={12}/>}
-                        <span>{log.type} EVENT</span>
+            {/* 科技数据面板 - 极简白卡片 */}
+            <div className="space-y-4 bg-cyan-50/30 p-5 rounded-2xl border border-cyan-100">
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                        <span>CITIZENS</span>
+                        <span className="font-mono">{gameState.speciesA.population.toLocaleString()}</span>
                     </div>
-
-                    {/* Content */}
-                    <div className={`text-sm leading-relaxed ${log.type === 'NARRATIVE' ? 'font-serif text-slate-600 italic' : ''}`}>
-                        {log.text.replace('> ', '')}
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-cyan-500 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesA.population / 2000)}%`}}></div></div>
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                        <span>ENERGY</span>
+                        <span className="font-mono flex items-center gap-1"><Zap size={10}/> {gameState.speciesA.food.toLocaleString()}</span>
                     </div>
-
-                    {/* Stats */}
-                    {log.changes && (
-                        <div className="mt-2 flex gap-2 justify-end opacity-90">
-                            <StatPill val={log.changes.popChange} type="POP"/>
-                            <StatPill val={log.changes.foodChange} type="RES"/>
-                        </div>
-                    )}
-                </div>
-            ))}
-        </div>
-      </section>
-
-
-      {/* 🔵 右侧：魔法文明 (Magic/Fantasy) */}
-      <section className="w-1/3 flex flex-col bg-indigo-950 text-purple-100 border-l-4 border-indigo-900 shadow-2xl z-10">
-        {/* Header */}
-        <div className="p-6 border-b border-indigo-800 bg-indigo-950 relative overflow-hidden">
-            <div className="absolute top-0 left-0 p-2 opacity-10"><Scroll size={120} /></div>
-            <h2 className="text-2xl font-serif font-bold text-purple-300 tracking-wide text-right flex items-center justify-end gap-2 relative z-10">
-                 {gameState.speciesB.name} <Moon className="text-yellow-200"/>
-            </h2>
-            <div className="text-[10px] text-purple-400 font-serif mt-1 tracking-widest text-right italic">THE GRAND ARCHIVE</div>
-        </div>
-
-        {/* Dashboard */}
-        <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-            {/* Stats */}
-            <div className="space-y-4">
-                <div className="bg-indigo-900/40 p-3 rounded-xl border border-indigo-700/50">
-                    <div className="flex justify-between text-xs font-serif text-purple-400 mb-1">BELIEVERS (信徒)</div>
-                    <div className="text-2xl font-serif text-white text-right">{gameState.speciesB.population.toLocaleString()}</div>
-                    <div className="h-1 bg-indigo-800 mt-2 rounded-full overflow-hidden"><div className="h-full bg-purple-500" style={{width: '60%'}}></div></div>
-                </div>
-                <div className="bg-indigo-900/40 p-3 rounded-xl border border-indigo-700/50">
-                    <div className="flex justify-between text-xs font-serif text-purple-400 mb-1">MANA (魔力)</div>
-                    <div className="text-2xl font-serif text-fuchsia-300 flex items-center justify-end gap-2">{gameState.speciesB.food.toLocaleString()} <Sparkles size={16}/></div>
-                    <div className="h-1 bg-indigo-800 mt-2 rounded-full overflow-hidden"><div className="h-full bg-fuchsia-500" style={{width: '60%'}}></div></div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-amber-400 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesA.food / 2000)}%`}}></div></div>
                 </div>
             </div>
 
-            {/* Spell Book */}
-            <div>
-                <h3 className="text-xs font-serif text-indigo-400 mb-3 flex items-center justify-end gap-2 border-b border-indigo-800 pb-1">
-                    GRIMOIRE OF FORBIDDEN ARTS <BookOpen size={12}/>
+            {/* 科技树 - 胶囊标签 */}
+            <div className="flex-1 overflow-hidden">
+                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1">
+                    <Rocket size={12}/> Tech Tree
                 </h3>
-                <div className="flex flex-wrap gap-2 justify-end">
-                    {gameState.speciesB.traits.map((t, i) => (
-                        <span key={i} className="px-3 py-1 bg-indigo-900/60 text-purple-200 text-xs font-serif border border-indigo-700 rounded-full italic">
+                <div className="flex flex-wrap gap-2 content-start">
+                    {gameState.speciesA.traits.map((t, i) => (
+                        <span key={i} className="px-3 py-1 bg-white border border-cyan-200 text-cyan-700 text-xs rounded-full shadow-sm font-medium hover:border-cyan-400 transition-colors">
                             {t}
                         </span>
                     ))}
                 </div>
             </div>
-        </div>
-        
-        {/* Status Footer */}
-        <div className="p-4 bg-indigo-950 border-t border-indigo-800 text-xs font-serif text-purple-500 flex justify-between">
-            <span className="opacity-50">✨ ETERNAL WATCH</span>
-            <span>RITUAL: {gameState.speciesB.action}</span>
-        </div>
-      </section>
+        </section>
 
+        {/* 🟡 中间：历史时间轴 (Timeline) */}
+        <section className="w-[40%] bg-gray-50 flex flex-col border-r border-gray-200">
+            <div className="p-3 bg-white border-b border-gray-200 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center shadow-sm z-10">
+                Timeline Feed (Newest First)
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-5 space-y-3 custom-scrollbar">
+                {logs.map((log, i) => (
+                    <div key={i} className={`
+                        p-4 rounded-xl border shadow-sm transition-all duration-300 bg-white
+                        ${log.type === 'DISASTER' ? 'border-red-200 bg-red-50/50' : 'border-gray-100'}
+                        ${(log.type === 'TECH' || (log.type === 'BATTLE' && log.changes?.species === 'A')) ? 'border-l-4 border-l-cyan-500' : ''}
+                        ${(log.type === 'MAGIC' || (log.type === 'BATTLE' && log.changes?.species === 'B')) ? 'border-l-4 border-l-purple-500' : ''}
+                    `}>
+                        {/* 标签头 */}
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-1.5">
+                                {log.type === 'DISASTER' && <AlertTriangle size={14} className="text-red-500"/>}
+                                {log.type === 'TECH' && <Cpu size={14} className="text-cyan-600"/>}
+                                {log.type === 'MAGIC' && <Sparkles size={14} className="text-purple-600"/>}
+                                {log.type === 'BATTLE' && <Crosshair size={14} className="text-slate-600"/>}
+                                {log.type === 'NARRATIVE' && <History size={14} className="text-slate-400"/>}
+                                
+                                <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                                    log.type === 'DISASTER' ? 'text-red-600' : 'text-slate-500'
+                                }`}>
+                                    {log.type} EVENT
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* 正文 - 正常字体，非斜体 */}
+                        <div className={`text-sm leading-relaxed ${
+                            log.type === 'NARRATIVE' ? 'text-slate-600 font-medium' : 'text-slate-700'
+                        }`}>
+                            {log.text.replace('> ', '')}
+                        </div>
+
+                        {/* 数值变化 */}
+                        {log.changes && (
+                            <div className="mt-3 flex gap-2 justify-end border-t border-gray-50 pt-2">
+                                <StatPill val={log.changes.popChange} type="POP"/>
+                                <StatPill val={log.changes.foodChange} type="RES"/>
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </section>
+
+
+        {/* 🔵 右侧：魔法文明 (Magic - Purple/Gold Theme) */}
+        <section className="flex-1 p-6 flex flex-col gap-5 bg-white text-right">
+             <div className="flex justify-between items-start flex-row-reverse">
+                <div>
+                    <h2 className="text-2xl font-serif font-black text-slate-800 tracking-tight flex items-center justify-end gap-2">
+                         {gameState.speciesB.name} <Moon className="text-purple-600"/>
+                    </h2>
+                    <div className="text-[10px] text-purple-600 font-bold mt-1 tracking-widest uppercase font-serif">High Arcane Council</div>
+                </div>
+                <ActionBadge action={gameState.speciesB.action} type="magic" />
+            </div>
+
+            {/* 魔法数据面板 */}
+            <div className="space-y-4 bg-purple-50/30 p-5 rounded-2xl border border-purple-100">
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1 flex-row-reverse">
+                        <span>BELIEVERS</span>
+                        <span className="font-serif">{gameState.speciesB.population.toLocaleString()}</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden transform rotate-180"><div className="h-full bg-purple-500 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesB.population / 2000)}%`}}></div></div>
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1 flex-row-reverse">
+                        <span>MANA</span>
+                        <span className="font-serif flex items-center gap-1">{gameState.speciesB.food.toLocaleString()} <Sparkles size={10}/></span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden transform rotate-180"><div className="h-full bg-fuchsia-400 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesB.food / 2000)}%`}}></div></div>
+                </div>
+            </div>
+
+            {/* 禁咒书 - 衬线体标签 */}
+            <div className="flex-1 overflow-hidden">
+                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center justify-end gap-1">
+                    Grimoire <BookOpen size={12}/>
+                </h3>
+                <div className="flex flex-wrap gap-2 content-start justify-end">
+                    {gameState.speciesB.traits.map((t, i) => (
+                        <span key={i} className="px-3 py-1 bg-white border border-purple-200 text-purple-800 text-xs rounded-full shadow-sm font-serif italic hover:border-purple-400 transition-colors">
+                            {t}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        </section>
+
+      </div>
     </main>
   );
 }
