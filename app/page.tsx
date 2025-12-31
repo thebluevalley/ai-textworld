@@ -1,185 +1,276 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Terminal, Activity, Cpu, Brain, Users, Radio, Server, Zap, Database, ShieldAlert } from 'lucide-react';
+import { Dna, Activity,  Wind, Droplets, Skull, Zap,  Flame, Snowflake, Radiation, Bug, Layers, Fingerprint } from 'lucide-react';
 
-// === 新设定：高科技研究设施 ===
+// === 初始状态：原始汤 ===
 const INITIAL_STATE = {
   tickCount: 0,
-  // 设施状态
-  facilityStatus: { 
-    integrity: 100, // 结构完整性
-    power: 98,      // 能源稳定性
-    entropy: 5      // 系统熵值 (混乱度)
+  // 环境参数
+  environment: { 
+    temperature: 20, // 摄氏度
+    radiation: 10,   // 辐射值
+    waterLevel: 50   // 水位
   },
-  // 研究团队
-  crew: [
-    { name: 'Dr. Aris', role: 'Lead Scientist', status: 'ACTIVE', focus: 95, stress: 20, location: 'CORE LAB' },
-    { name: 'Dr. Beryl', role: 'Quantum Phys', status: 'ACTIVE', focus: 90, stress: 15, location: 'DATA CTR' },
-    { name: 'Eng. Tyrell', role: 'Sys Admin', status: 'ACTIVE', focus: 85, stress: 30, location: 'SERVER RM' },
-    { name: 'Spec. Vance', role: 'Hardware Ops', status: 'ACTIVE', focus: 90, stress: 25, location: 'POWER GRID' },
-    { name: 'Unit 734', role: 'Research Bot', status: 'ONLINE', focus: 100, stress: 0, location: 'HALLWAY' },
-  ],
-  eventLog: ["SYS: Project Genesis initialized.", "SYS: Tri-Core connection stable.", "SYS: Awaiting experimental data."]
+  // 物种信息
+  species: {
+    name: 'Primordial Cell Alpha',
+    era: 'CELLULAR', 
+    population: 5000,
+    dnaPoints: 0,
+    // 基因库：按分类存储
+    genes: {
+      MORPHOLOGY: ['Cell Wall'],
+      METABOLISM: ['Osmosis'],
+      SENSORY: ['Touch Receptor'],
+      COGNITION: ['Basic Instinct']
+    } as Record<string, string[]>,
+    status: 'STABLE'
+  },
+  eventLog: [
+    "SYS: Gene Pool Database initialized.",
+    "EPOCH 0: Life emerges in the warm soup."
+  ]
 };
 
 export default function Home() {
   const [gameState, setGameState] = useState(INITIAL_STATE);
   const [logs, setLogs] = useState<string[]>(INITIAL_STATE.eventLog);
-  const [netStatus, setNetStatus] = useState<'IDLE' | 'PROCESSING'>('IDLE');
+  const [netStatus, setNetStatus] = useState<'IDLE' | 'EVOLVING'>('IDLE');
+  const [playerIntervention, setPlayerIntervention] = useState<string | null>(null); // 上帝指令
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs]);
 
-  // === 全自动循环 ===
+  // === 进化循环 ===
   const runGameLoop = async () => {
-    setNetStatus('PROCESSING');
+    setNetStatus('EVOLVING');
+    
+    // 如果有玩家指令，这一轮就执行它，执行完清空
+    const currentIntervention = playerIntervention;
+    if (currentIntervention) setPlayerIntervention(null); 
 
     try {
       const res = await fetch('/api/game-tick', {
         method: 'POST',
-        body: JSON.stringify({ gameState: { ...gameState, eventLog: logs } })
+        body: JSON.stringify({ 
+          gameState: { ...gameState, eventLog: logs },
+          playerIntervention: currentIntervention 
+        })
       });
 
       if (res.ok) {
         const data = await res.json();
         
-        const updates = data.stateUpdates || {};
-        const newCrew = gameState.crew.map(member => {
-          const u = updates.crewUpdates?.find((x:any) => x.name === member.name);
-          if (u) {
-            // 更新专注度和压力值
-            const newFocus = Math.max(0, Math.min(100, member.focus + (u.focus || 0)));
-            const newStress = Math.max(0, Math.min(100, member.stress + (u.stress || 0)));
-            // 如果压力过大，状态变为 INCAPACITATED (丧失工作能力)，而不是死亡
-            let newStatus = u.status || member.status;
-            if (newStress >= 100) newStatus = 'INCAPACITATED';
-            if (newStress < 80 && newStatus === 'INCAPACITATED') newStatus = 'ACTIVE';
-
-            return { ...member, ...u, focus: newFocus, stress: newStress, status: newStatus };
-          }
-          return member;
-        });
-
-        const newFacilityStatus = {
-          integrity: Math.max(0, gameState.facilityStatus.integrity + (updates.integrity || 0)),
-          power: Math.max(0, gameState.facilityStatus.power + (updates.power || 0)),
-          // 熵值增加
-          entropy: Math.max(0, Math.min(100, gameState.facilityStatus.entropy + (updates.entropy || 0))),
+        // 1. 处理环境变化
+        const envUpdates = data.stateUpdates?.environmentChange || {};
+        const newEnv = {
+            temperature: Math.max(-50, Math.min(100, gameState.environment.temperature + (envUpdates.temperature || 0))),
+            radiation: Math.max(0, gameState.environment.radiation + (envUpdates.radiation || 0)),
+            waterLevel: Math.max(0, Math.min(100, gameState.environment.waterLevel + (envUpdates.waterLevel || 0))),
         };
 
-        // ⚡️ 修复：显式声明数组类型，防止 TypeScript 报错
+        // 2. 处理基因录入 (优胜劣汰)
+        const isSuccess = data.is_successful;
+        const newGenes = { ...gameState.species.genes };
+        const mutation = data.mutation_attempt;
+        
+        if (isSuccess && mutation) {
+            // 如果进化成功，基因入库
+            const cat = mutation.category || 'MORPHOLOGY';
+            if (!newGenes[cat]) newGenes[cat] = [];
+            // 避免重复
+            if (!newGenes[cat].includes(mutation.new_gene_name)) {
+                newGenes[cat] = [...newGenes[cat], mutation.new_gene_name];
+            }
+        }
+
+        // 3. 种群与状态
+        const popChange = data.stateUpdates?.populationChange || 0;
+        let newPop = Math.max(0, gameState.species.population + popChange);
+        let newStatus = isSuccess ? 'ADAPTING' : 'DYING';
+        if (newPop < 500) newStatus = 'ENDANGERED';
+        if (newPop <= 0) { newPop = 0; newStatus = 'EXTINCT'; }
+
+        // 4. 日志生成
         const newEntries: string[] = [];
+        // 上帝干预的特殊日志
+        if (currentIntervention) newEntries.push(`⚡️ GOD INTERVENTION: ${currentIntervention}`);
         
         if (data.narrative) newEntries.push(`> ${data.narrative}`);
-        if (data.system_action) newEntries.push(`:: CORE PROTOCOL :: ${data.system_action}`);
+        
+        if (isSuccess) {
+            newEntries.push(`✅ GENE ACCEPTED: [${mutation?.new_gene_name || 'Mutation'}] - ${data.evolutionary_verdict}`);
+            if (data.new_species_name) newEntries.push(`🧬 SPECIES RENAMED: [${data.new_species_name}]`);
+        } else {
+            if (mutation) newEntries.push(`❌ GENE REJECTED: [${mutation.new_gene_name}] - ${data.evolutionary_verdict}`);
+            newEntries.push(`💀 POPULATION LOST: ${Math.abs(popChange)}`);
+        }
 
         setLogs(prev => [...prev, ...newEntries]);
-        setGameState(prev => ({
-          ...prev,
-          crew: newCrew,
-          facilityStatus: newFacilityStatus,
-          tickCount: prev.tickCount + 1
-        }));
+        
+        if (newStatus !== 'EXTINCT') {
+          setGameState(prev => ({
+            ...prev,
+            environment: newEnv,
+            species: {
+                ...prev.species,
+                name: data.new_species_name || prev.species.name,
+                population: newPop,
+                genes: newGenes,
+                dnaPoints: prev.species.dnaPoints + (isSuccess ? 10 : 0),
+                era: data.stateUpdates?.era || prev.species.era,
+                status: newStatus
+            },
+            tickCount: prev.tickCount + 1
+          }));
+        }
       }
     } catch (e) { console.error(e); } 
     finally {
       setNetStatus('IDLE');
-      timerRef.current = setTimeout(runGameLoop, 5000);
+      if (gameState.species.status !== 'EXTINCT') {
+          timerRef.current = setTimeout(runGameLoop, 6000); // 6秒一轮
+      }
     }
   };
 
+  // 初次启动
   useEffect(() => {
     runGameLoop();
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  // === UI 渲染 ===
+  // 玩家手动触发干预
+  const triggerGodMode = (type: string) => {
+      setPlayerIntervention(type);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setLogs(prev => [...prev, `... PREPARING PLANETARY EVENT: ${type} ...`]);
+      setTimeout(runGameLoop, 1000);
+  };
+
   return (
-    <main className="flex h-screen w-full bg-slate-900 text-slate-200 font-mono overflow-hidden relative bg-[url('/subtle-grid.png')]">
-      
-      {/* 左侧数据面板 - 深蓝灰色块 */}
-      <div className="w-1/3 border-r border-slate-700/50 p-6 flex flex-col gap-6 bg-slate-800/50 backdrop-blur-sm z-10 shadow-xl">
-        <div className="flex flex-col gap-1 border-b border-slate-700 pb-4">
-          <div className="flex items-center gap-2 text-blue-400">
-            <Server size={24} />
-            <h1 className="text-xl font-bold tracking-widest">PROJECT: GENESIS</h1>
+    <main className="flex h-screen w-full bg-slate-950 text-emerald-100 font-mono overflow-hidden relative">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black opacity-80 pointer-events-none"></div>
+
+      {/* 左侧：基因库展示 */}
+      <div className="w-1/3 border-r border-emerald-900/50 p-6 flex flex-col gap-6 bg-slate-900/80 backdrop-blur-md z-10 shadow-2xl">
+        <div className="border-b border-emerald-800 pb-4">
+          <div className="flex items-center gap-3 text-emerald-400 mb-1">
+            <Fingerprint size={28} />
+            <h1 className="text-xl font-bold tracking-widest">GENOME DATABASE</h1>
           </div>
-          {/* AI 状态指示灯 */}
-          <div className="flex gap-2 mt-2 text-[10px] font-semibold tracking-wider">
-            <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-orange-900/80 text-orange-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
-              <Activity size={10}/> ANOMALY (RED)
-            </span>
-            <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-blue-900/80 text-blue-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
-              <Users size={10}/> RESEARCH (BLUE)
-            </span>
-            <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-emerald-900/80 text-emerald-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
-              <Radio size={10}/> CORE (VOLC)
-            </span>
+          <div className="text-xs text-emerald-600 font-bold uppercase tracking-widest">
+             Subject: {gameState.species.name}
           </div>
         </div>
 
-        {/* 设施状态监控 */}
-        <div className="space-y-4">
-          <div className="flex justify-between items-center text-sm">
-            <span className="flex items-center gap-2 text-slate-400"><ShieldAlert size={14}/> STRUCTURE INTEGRITY</span>
-            <div className="w-32 h-2 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${gameState.facilityStatus.integrity}%`}}></div></div>
-          </div>
-          <div className="flex justify-between items-center text-sm">
-            <span className="flex items-center gap-2 text-slate-400"><Zap size={14}/> POWER GRID STABILITY</span>
-            <div className="w-32 h-2 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-cyan-500" style={{width: `${gameState.facilityStatus.power}%`}}></div></div>
-          </div>
-          <div className="flex justify-between items-center text-orange-400 text-sm font-bold">
-            <span className="flex items-center gap-2"><Database size={14}/> SYSTEM ENTROPY</span>
-            <span>{gameState.facilityStatus.entropy.toFixed(1)}%</span>
-          </div>
-        </div>
-
-        {/* 研究团队名单 */}
-        <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-          {gameState.crew.map((c) => {
-            const isStressed = c.stress > 70;
-            const isDown = c.status !== 'ACTIVE' && c.status !== 'ONLINE';
-            return (
-            <div key={c.name} className={`p-3 rounded-md flex justify-between items-center border transition-all ${isDown ? 'border-orange-900/50 bg-orange-900/10 text-orange-300' : 'border-slate-700 bg-slate-800/80'}`}>
-              <div>
-                <div className="font-bold text-sm flex items-center gap-2">
-                  {c.role.includes('Bot') ? <Cpu size={14}/> : <Users size={14}/>} {c.name}
+        {/* 基因列表 (分类显示) */}
+        <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+            {Object.entries(gameState.species.genes).map(([category, genes]) => (
+                <div key={category} className="bg-slate-950/50 border border-emerald-900/30 rounded p-3">
+                    <h3 className="text-[10px] font-bold text-emerald-500 mb-2 flex items-center gap-2">
+                        {category === 'MORPHOLOGY' && <Layers size={12}/>}
+                        {category === 'METABOLISM' && <Zap size={12}/>}
+                        {category === 'SENSORY' && <Activity size={12}/>}
+                        {category === 'COGNITION' && <Dna size={12}/>}
+                        {category}
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                        {genes.map((gene, i) => (
+                            <span key={i} className="px-2 py-1 bg-emerald-900/20 text-emerald-300 text-xs rounded border border-emerald-800/50">
+                                {gene}
+                            </span>
+                        ))}
+                    </div>
                 </div>
-                <div className="text-[10px] text-slate-400 mt-1">{c.role} | <span className="text-blue-300">{c.location}</span></div>
-              </div>
-              <div className="text-right text-xs flex flex-col gap-1">
-                <div className="text-blue-400">FOCUS: {c.focus}%</div>
-                <div className={`${isStressed ? 'text-orange-400 font-bold' : 'text-slate-400'}`}>STRESS: {c.stress}%</div>
-                {isDown && <div className="text-[10px] text-orange-500 font-bold mt-1">{c.status}</div>}
-              </div>
+            ))}
+        </div>
+
+        {/* 环境仪表盘 */}
+        <div className="grid grid-cols-3 gap-2 text-center text-xs border-t border-emerald-800 pt-4">
+            <div className="p-2 bg-slate-900 rounded border border-emerald-900/50">
+                <div className="text-emerald-500 mb-1 flex justify-center"><Flame size={14}/></div>
+                <div>{gameState.environment.temperature.toFixed(0)}°C</div>
             </div>
-          )})}
+            <div className="p-2 bg-slate-900 rounded border border-emerald-900/50">
+                <div className="text-emerald-500 mb-1 flex justify-center"><Radiation size={14}/></div>
+                <div>{gameState.environment.radiation} mSv</div>
+            </div>
+            <div className="p-2 bg-slate-900 rounded border border-emerald-900/50">
+                <div className="text-emerald-500 mb-1 flex justify-center"><Droplets size={14}/></div>
+                <div>{gameState.environment.waterLevel}% H2O</div>
+            </div>
         </div>
       </div>
 
-      {/* 右侧日志瀑布 */}
-      <div className="flex-1 p-8 overflow-y-auto font-mono text-lg leading-relaxed bg-slate-900 custom-scrollbar" ref={scrollRef}>
-        <div className="space-y-6 pb-32">
-          {logs.map((log, i) => {
-            const isSystem = log.startsWith("::") || log.startsWith("SYS:");
-            const isNarrative = log.startsWith(">");
-            const isDialogue = log.includes("]:");
-            return (
-              <div key={i} className={`
-                ${isSystem ? 'text-blue-400 font-bold border-l-2 border-blue-500 pl-4 text-base' : ''}
-                ${isNarrative ? 'text-slate-300 italic' : ''}
-                ${isDialogue ? 'text-cyan-300 pl-4' : ''}
-                ${!isSystem && !isNarrative && !isDialogue ? 'text-slate-500 text-sm' : ''}
-                animate-in fade-in slide-in-from-bottom-1 duration-300
-              `}>
-                {log}
-              </div>
-            );
-          })}
-          {netStatus === 'PROCESSING' && <div className="text-blue-500/70 animate-pulse text-sm">&gt; Analyzing experiment data...</div>}
+      {/* 右侧：进化日志与上帝控制台 */}
+      <div className="flex-1 flex flex-col h-full bg-slate-950 relative">
+        {/* 日志区 */}
+        <div className="flex-1 p-10 overflow-y-auto font-sans leading-relaxed custom-scrollbar" ref={scrollRef}>
+            <div className="max-w-4xl mx-auto space-y-6 pb-40">
+            {logs.map((log, i) => {
+                const isSuccess = log.includes("GENE ACCEPTED");
+                const isFail = log.includes("GENE REJECTED") || log.includes("POPULATION LOST");
+                const isGod = log.includes("GOD INTERVENTION");
+                const isRename = log.includes("SPECIES RENAMED");
+                const isNarrative = log.startsWith(">");
+                
+                return (
+                <div key={i} className={`
+                    ${isGod ? 'text-yellow-400 font-bold text-center border-y border-yellow-900 py-2 my-4 bg-yellow-900/10' : ''}
+                    ${isSuccess ? 'text-emerald-400 border-l-2 border-emerald-500 pl-4' : ''}
+                    ${isFail ? 'text-red-400 border-l-2 border-red-500 pl-4 opacity-80' : ''}
+                    ${isRename ? 'text-cyan-300 font-bold text-lg mt-4' : ''}
+                    ${isNarrative ? 'text-slate-300 italic text-lg' : ''}
+                    ${!isSuccess && !isFail && !isGod && !isRename && !isNarrative ? 'text-slate-500 text-sm' : ''}
+                    animate-in fade-in slide-in-from-bottom-2 duration-500
+                `}>
+                    {log}
+                </div>
+                );
+            })}
+            {gameState.species.status === 'EXTINCT' && (
+                <div className="text-red-600 text-5xl font-black text-center mt-20 opacity-50">
+                    EXTINCTION
+                </div>
+            )}
+            </div>
+        </div>
+
+        {/* 底部：上帝控制台 (God Controls) */}
+        <div className="h-24 bg-slate-900 border-t border-emerald-900 p-4 z-20 flex items-center justify-center gap-4 shadow-2xl">
+            <div className="text-xs text-emerald-700 font-bold mr-4 uppercase tracking-widest">
+                Environmental<br/>Override
+            </div>
+            
+            <button onClick={() => triggerGodMode('ICE AGE')} className="group flex flex-col items-center gap-1 p-2 rounded hover:bg-cyan-900/30 transition-all border border-transparent hover:border-cyan-700">
+                <Snowflake size={20} className="text-cyan-500 group-hover:scale-110 transition-transform"/>
+                <span className="text-[10px] text-cyan-500 font-bold">ICE AGE</span>
+            </button>
+            
+            <button onClick={() => triggerGodMode('GLOBAL WARMING')} className="group flex flex-col items-center gap-1 p-2 rounded hover:bg-orange-900/30 transition-all border border-transparent hover:border-orange-700">
+                <Flame size={20} className="text-orange-500 group-hover:scale-110 transition-transform"/>
+                <span className="text-[10px] text-orange-500 font-bold">HEAT WAVE</span>
+            </button>
+            
+            <button onClick={() => triggerGodMode('RADIATION BURST')} className="group flex flex-col items-center gap-1 p-2 rounded hover:bg-green-900/30 transition-all border border-transparent hover:border-green-700">
+                <Radiation size={20} className="text-green-500 group-hover:scale-110 transition-transform"/>
+                <span className="text-[10px] text-green-500 font-bold">RADIATION</span>
+            </button>
+            
+            <button onClick={() => triggerGodMode('VIRAL OUTBREAK')} className="group flex flex-col items-center gap-1 p-2 rounded hover:bg-purple-900/30 transition-all border border-transparent hover:border-purple-700">
+                <Bug size={20} className="text-purple-500 group-hover:scale-110 transition-transform"/>
+                <span className="text-[10px] text-purple-500 font-bold">VIRUS</span>
+            </button>
+
+            <button onClick={() => triggerGodMode('METEOR STRIKE')} className="group flex flex-col items-center gap-1 p-2 rounded hover:bg-red-900/30 transition-all border border-transparent hover:border-red-700 ml-4">
+                <Skull size={20} className="text-red-500 group-hover:scale-110 transition-transform"/>
+                <span className="text-[10px] text-red-500 font-bold">EXTINCTION</span>
+            </button>
         </div>
       </div>
+
     </main>
   );
 }
