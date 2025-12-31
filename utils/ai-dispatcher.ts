@@ -4,18 +4,15 @@ interface AIRequestOptions {
   systemPrompt: string;
   userPrompt: string;
   temperature?: number;
-  team?: 'BLUE' | 'RED'; // ⚡️ 新增：指定队伍
+  team?: 'BLUE' | 'RED'; 
 }
 
 export class AIDispatcher {
   
-  // 获取对应队伍的 Key
   private static getKeyForTeam(team?: 'BLUE' | 'RED'): string {
     let key = '';
     if (team === 'BLUE') key = process.env.SILICON_KEY_BLUE || '';
     if (team === 'RED') key = process.env.SILICON_KEY_RED || '';
-    
-    // 兜底：如果没有配置专用 Key，就用通用的 SILICON_KEYS
     if (!key) {
       const pool = process.env.SILICON_KEYS?.split(',') || [];
       return pool[Math.floor(Math.random() * pool.length)] || '';
@@ -23,7 +20,7 @@ export class AIDispatcher {
     return key;
   }
 
-  static async chatCompletion({ systemPrompt, userPrompt, temperature = 0.7, team }: AIRequestOptions) {
+  static async chatCompletion({ systemPrompt, userPrompt, temperature = 0.6, team }: AIRequestOptions) { // 温度稍微调低，让逻辑更严密
     const apiKey = this.getKeyForTeam(team);
     
     if (!apiKey) {
@@ -48,37 +45,42 @@ export class AIDispatcher {
             { role: 'user', content: userPrompt }
           ],
           temperature: temperature,
-          max_tokens: 1024, // 增加 token 数以支持复杂战术
+          max_tokens: 1500, // 增加 Token 以容纳 CoT 思考过程
         })
       });
 
-      if (response.status === 429) {
-        console.warn(`[AI Warn] Rate Limit 429 for ${team}`);
-        return { error: 429 };
-      }
-
-      if (!response.ok) {
-        const txt = await response.text();
-        console.warn(`API Warn: ${response.status} - ${txt}`);
-        return null; 
-      }
+      if (response.status === 429) return { error: 429 };
+      if (!response.ok) return null;
       
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // JSON 提取与修复
-      content = content.replace(/```json/g, '').replace(/```/g, '');
-      const firstBrace = content.indexOf('{');
-      const lastBrace = content.lastIndexOf('}');
+      // === ⚡️ 智能 JSON 提取器 ===
+      // 1. 尝试找 ```json 包裹的内容
+      const jsonBlockMatch = content.match(/```json([\s\S]*?)```/);
+      let jsonString = '';
 
-      if (firstBrace !== -1 && lastBrace !== -1) {
-        let jsonString = content.substring(firstBrace, lastBrace + 1);
-        // 自动修复常见的 JSON 格式错误 (如漏掉 y 坐标)
-        jsonString = jsonString.replace(/"x":\s*(\d+),\s*(\d+)\s*}/g, '"x": $1, "y": $2 }');
+      if (jsonBlockMatch) {
+        jsonString = jsonBlockMatch[1];
+      } else {
+        // 2. 如果没有 code block，尝试找最外层的 {}
+        const firstBrace = content.indexOf('{');
+        const lastBrace = content.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          jsonString = content.substring(firstBrace, lastBrace + 1);
+        }
+      }
+
+      // 3. 容错修复
+      if (jsonString) {
+        // 修复漏掉逗号的常见错误
+        jsonString = jsonString.replace(/,\s*}/g, '}'); 
         try {
-          return JSON.parse(jsonString);
+          const parsed = JSON.parse(jsonString);
+          // 把原始思考过程也带上，虽然前端暂时不用，但方便调试
+          return { ...parsed, _raw_thought: content };
         } catch (e) {
-          console.error(`[AI Parse Error]`, jsonString);
+          console.error(`[AI Parse Error] Content:`, content);
           return null;
         }
       }
