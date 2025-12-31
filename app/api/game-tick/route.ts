@@ -1,85 +1,105 @@
 import { NextResponse } from 'next/server';
 import { AIDispatcher } from '@/utils/ai-dispatcher';
 
-// Fisher-Yates 洗牌算法
-function shuffleArray(array: any[]) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
+// 基础 Prompt 生成器
+const generateSystemPrompt = (team: string, mapSize: number) => {
+  const isBlue = team === 'BLUE';
+  
+  // 🎭 赋予不同的战术性格
+  const personality = isBlue 
+    ? `TACTIC: "PRECISION & CONTROL". Use bounding overwatch. Prioritize survival.` // 蓝队：特警风格，稳健
+    : `TACTIC: "AGGRESSION & CHAOS". Flank hard. Rush solitary enemies. Overwhelm them.`; // 红队：悍匪风格，激进
+
+  return `You are the COMMANDER of the ${team} TEAM. Map: ${mapSize}x${mapSize}.
+  You are fighting against the ${isBlue ? 'RED' : 'BLUE'} Team.
+  
+  ${personality}
+  
+  CRITICAL RULES:
+  1. You only control units with team="${team}".
+  2. You can ONLY see enemies in the "visible_hostiles" list.
+  3. If "visible_hostiles" is empty -> SEARCH. Move to map center or cover points.
+  4. If HP < 300 -> RETREAT to cover.
+  
+  SQUAD ROLES:
+  - HEAVY: Suppress known enemy locations.
+  - SNIPER: Hold long angles.
+  - ASSAULT/LEADER: Flank.
+  
+  Output Example:
+  {
+    "actions": [
+      { "unitId": "${isBlue?'b1':'r1'}", "type": "MOVE", "target": {"x":10,"y":10}, "tactic": "RUSH", "thought": "Flanking!" }
+    ]
   }
-  return array;
-}
+  `;
+};
 
 export async function POST(req: Request) {
   const { units, obstacles, mapSize } = await req.json();
 
-  // === 1. 战术分组 ===
-  const alphaIds = units.filter((u:any) => ['LEADER', 'MEDIC', 'ASSAULT'].includes(u.role)).map((u:any) => u.id);
+  // === 1. 数据拆分 (构建战争迷雾) ===
+  const blueUnits = units.filter((u:any) => u.team === 'BLUE');
+  const redUnits = units.filter((u:any) => u.team === 'RED');
 
-  const systemPrompt = `You are a WARGAME AI controlling TWO opposing teams (BLUE vs RED). 
-  Map: ${mapSize}x${mapSize}.
-  
-  ⚠️ **CRITICAL ISSUE TO FIX**: RED TEAM IS NOT MOVING.
-  **YOU MUST GENERATE MOVE COMMANDS FOR THE RED TEAM.**
-  
-  TACTICAL DOCTRINE:
-  1. 🔴 **RED TEAM (AGGRESSORS):**
-     - STRATEGY: "VIOLENCE OF ACTION".
-     - DO NOT CAMP. MOVE towards Blue team every turn.
-     - HEAVY/SNIPER: Move to new vantage points. Don't stay in spawn.
-     - ASSAULT: Rush flanks.
-  
-  2. 🔵 **BLUE TEAM (DEFENDERS):**
-     - STRATEGY: "FLEXIBLE DEFENSE".
-     - Hold angles, but fall back if overrun.
-  
-  3. ⚔️ **ACTIONS:**
-     - **MOVE**: Standard movement.
-     - **RUSH**: Fast move (Speed x1.5), No shooting. Use this to cross open ground.
-     - **SUPPRESS**: Stop moving, shoot fast. ONLY use if enemy is VISIBLE. If no enemy, STOP suppressing and MOVE.
-  
-  Example Output (Must include RED units):
-  {
-    "actions": [
-      { "unitId": "b1", "type": "MOVE", "target": {"x": 10, "y": 10}, "tactic": "COVER_FIRE", "thought": "Holding angle" },
-      { "unitId": "r1", "type": "MOVE", "target": {"x": 20, "y": 20}, "tactic": "RUSH", "thought": "Flanking Blue!" },
-      { "unitId": "r_heavy", "type": "MOVE", "target": {"x": 15, "y": 15}, "tactic": "MOVE", "thought": "Advancing MG" }
-    ]
-  }
-  `;
-
-  // === 2. 数据打乱 (防止 AI 只关注列表前几个单位) ===
-  // 我们打乱顺序发给 AI，但保留原始索引以便后续处理（如果需要）
-  const promptData = units.map((u: any) => ({
-    id: u.id, 
-    team: u.team, 
-    role: u.role, 
-    pos: u.pos || {x: u.x, y: u.y}, 
-    hp: u.hp, 
-    isSuppressed: (u.suppression || 0) > 50,
-    // 简化视野数据
-    visibleEnemyCount: (u.visibleEnemies || []).length
+  // 计算蓝队视野 (蓝队能看到谁？)
+  const blueVisibleEnemies = new Set<string>();
+  blueUnits.forEach((u:any) => u.visibleEnemies?.forEach((e:any) => blueVisibleEnemies.add(e.id)));
+  const redExposedToBlue = redUnits.filter((r:any) => blueVisibleEnemies.has(r.id)).map((r:any) => ({
+    id: r.id, pos: r.pos, hp: r.hp, role: r.role // 蓝队只能拿到红队这部分信息
   }));
 
-  // ⚡️ 核心修复：打乱顺序，让 AI "雨露均沾"
-  const shuffledSquad = shuffleArray([...promptData]);
+  // 计算红队视野 (红队能看到谁？)
+  const redVisibleEnemies = new Set<string>();
+  redUnits.forEach((u:any) => u.visibleEnemies?.forEach((e:any) => redVisibleEnemies.add(e.id)));
+  const blueExposedToRed = blueUnits.filter((b:any) => redVisibleEnemies.has(b.id)).map((b:any) => ({
+    id: b.id, pos: b.pos, hp: b.hp, role: b.role // 红队只能拿到蓝队这部分信息
+  }));
 
-  const simplifiedObstacles = obstacles.map((o:any) => ({ x: Math.round(o.x+o.w/2), y: Math.round(o.y+o.h/2) }));
+  // 障碍物简化
+  const coverPoints = obstacles.map((o:any) => ({ x: Math.round(o.x+o.w/2), y: Math.round(o.y+o.h/2) })).slice(0,6);
 
-  const userPrompt = JSON.stringify({
-    active_units_randomized: shuffledSquad, // 发送乱序列表
-    key_cover_points: simplifiedObstacles.slice(0, 5)
+  // === 2. 并行请求双大脑 ===
+  
+  // 🔵 Blue Brain Request
+  const blueRequest = AIDispatcher.chatCompletion({
+    team: 'BLUE',
+    systemPrompt: generateSystemPrompt('BLUE', mapSize),
+    userPrompt: JSON.stringify({
+      my_squad: blueUnits.map((u:any) => ({ id:u.id, role:u.role, pos:u.pos, hp:u.hp, tactic:u.tactic })),
+      visible_hostiles: redExposedToBlue, // 只给看得到的
+      cover_points: coverPoints
+    })
   });
 
-  const result = await AIDispatcher.chatCompletion({
-    mode: 'reflex',
-    systemPrompt,
-    userPrompt
+  // 🔴 Red Brain Request
+  const redRequest = AIDispatcher.chatCompletion({
+    team: 'RED',
+    systemPrompt: generateSystemPrompt('RED', mapSize),
+    userPrompt: JSON.stringify({
+      my_squad: redUnits.map((u:any) => ({ id:u.id, role:u.role, pos:u.pos, hp:u.hp, tactic:u.tactic })),
+      visible_hostiles: blueExposedToRed, // 只给看得到的
+      cover_points: coverPoints
+    })
   });
 
-  if (result && result.error === 429) {
-    return NextResponse.json({ actions: [] }, { status: 429 });
+  // 等待双核响应
+  const [blueResult, redResult] = await Promise.all([blueRequest, redRequest]);
+
+  // === 3. 结果合并 ===
+  const combinedActions: any[] = [];
+  let has429 = false;
+
+  if (blueResult?.error === 429 || redResult?.error === 429) {
+    has429 = true;
   }
 
-  return NextResponse.json(result || { actions: [] });
+  if (blueResult?.actions) combinedActions.push(...blueResult.actions);
+  if (redResult?.actions) combinedActions.push(...redResult.actions);
+
+  if (has429) {
+    return NextResponse.json({ actions: combinedActions }, { status: 429 });
+  }
+
+  return NextResponse.json({ actions: combinedActions });
 }

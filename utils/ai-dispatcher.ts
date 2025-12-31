@@ -1,61 +1,36 @@
 // utils/ai-dispatcher.ts
 
-const keyUsageHistory: Record<string, number> = {};
-
 interface AIRequestOptions {
   systemPrompt: string;
   userPrompt: string;
-  mode: 'reflex' | 'tactic'; 
+  temperature?: number;
+  team?: 'BLUE' | 'RED'; // ⚡️ 新增：指定队伍
 }
 
 export class AIDispatcher {
-  private static getKeys(mode: 'reflex' | 'tactic'): string[] {
-    const keys = process.env.SILICON_KEYS?.split(',');
-    if (!keys || keys.length === 0) {
-      console.error(`[AI Error] No keys found in SILICON_KEYS.`);
-      return [];
+  
+  // 获取对应队伍的 Key
+  private static getKeyForTeam(team?: 'BLUE' | 'RED'): string {
+    let key = '';
+    if (team === 'BLUE') key = process.env.SILICON_KEY_BLUE || '';
+    if (team === 'RED') key = process.env.SILICON_KEY_RED || '';
+    
+    // 兜底：如果没有配置专用 Key，就用通用的 SILICON_KEYS
+    if (!key) {
+      const pool = process.env.SILICON_KEYS?.split(',') || [];
+      return pool[Math.floor(Math.random() * pool.length)] || '';
     }
-    return keys;
+    return key;
   }
 
-  private static getAvailableKey(keys: string[]): string {
-    const now = Date.now();
-    // ⚡ 极速模式：实名账号冷却仅需 1000ms
-    const cooldown = 1000; 
+  static async chatCompletion({ systemPrompt, userPrompt, temperature = 0.7, team }: AIRequestOptions) {
+    const apiKey = this.getKeyForTeam(team);
     
-    const shuffled = keys.sort(() => 0.5 - Math.random());
-    
-    for (const key of shuffled) {
-      const cleanKey = key.trim();
-      if (!cleanKey) continue;
-      
-      const lastUsed = keyUsageHistory[cleanKey] || 0;
-      if (now - lastUsed > cooldown) {
-        keyUsageHistory[cleanKey] = now;
-        return cleanKey; 
-      }
+    if (!apiKey) {
+      console.error(`[AI Error] No API Key found for team: ${team}`);
+      return null;
     }
 
-    // 强制回退
-    let oldestKey = keys[0];
-    let oldestTime = now;
-    for (const key of keys) {
-      const cleanKey = key.trim();
-      const lastUsed = keyUsageHistory[cleanKey] || 0;
-      if (lastUsed < oldestTime) {
-        oldestTime = lastUsed;
-        oldestKey = cleanKey;
-      }
-    }
-    keyUsageHistory[oldestKey] = now;
-    return oldestKey;
-  }
-
-  static async chatCompletion({ systemPrompt, userPrompt, mode }: AIRequestOptions) {
-    const keys = this.getKeys(mode);
-    if (keys.length === 0) return null;
-
-    const apiKey = this.getAvailableKey(keys);
     const endpoint = 'https://api.siliconflow.cn/v1/chat/completions';
     const model = 'Qwen/Qwen2.5-7B-Instruct'; 
 
@@ -72,46 +47,45 @@ export class AIDispatcher {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
           ],
-          temperature: 0.7,
-          max_tokens: 512, 
+          temperature: temperature,
+          max_tokens: 1024, // 增加 token 数以支持复杂战术
         })
       });
 
+      if (response.status === 429) {
+        console.warn(`[AI Warn] Rate Limit 429 for ${team}`);
+        return { error: 429 };
+      }
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.warn(`API Warn: ${response.status} - ${errorText}`);
+        const txt = await response.text();
+        console.warn(`API Warn: ${response.status} - ${txt}`);
         return null; 
       }
       
       const data = await response.json();
       let content = data.choices[0].message.content;
 
-      // 1. 清洗 Markdown
+      // JSON 提取与修复
       content = content.replace(/```json/g, '').replace(/```/g, '');
-      
-      // 2. 提取 JSON 主体
       const firstBrace = content.indexOf('{');
       const lastBrace = content.lastIndexOf('}');
 
       if (firstBrace !== -1 && lastBrace !== -1) {
         let jsonString = content.substring(firstBrace, lastBrace + 1);
-        
-        // === 🛠️ 核心修复：自动修补 AI 漏写的 "y" 键 ===
-        // 将 { "x": 17, 12 } 替换为 { "x": 17, "y": 12 }
+        // 自动修复常见的 JSON 格式错误 (如漏掉 y 坐标)
         jsonString = jsonString.replace(/"x":\s*(\d+),\s*(\d+)\s*}/g, '"x": $1, "y": $2 }');
-
         try {
           return JSON.parse(jsonString);
         } catch (e) {
-          console.error(`[AI Parse Error] Invalid JSON`, jsonString);
+          console.error(`[AI Parse Error]`, jsonString);
           return null;
         }
-      } else {
-        return null;
       }
+      return null;
       
     } catch (error) {
-      console.error(`[AI Error] Mode: ${mode}`, error);
+      console.error(`[AI Error] Team: ${team}`, error);
       return null;
     }
   }
