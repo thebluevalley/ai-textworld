@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Terminal, Activity, Cpu, Brain, Users, Radio, Server, Zap, Database } from 'lucide-react';
+import { Terminal, Activity, Cpu, Brain, Users, Radio, Server, Zap, Database, ShieldAlert } from 'lucide-react';
 
 // === 新设定：高科技研究设施 ===
 const INITIAL_STATE = {
@@ -31,7 +31,7 @@ export default function Home() {
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs]);
 
-  // === 全自动循环 (逻辑保持不变，只改变显示) ===
+  // === 全自动循环 ===
   const runGameLoop = async () => {
     setNetStatus('PROCESSING');
 
@@ -68,7 +68,9 @@ export default function Home() {
           entropy: Math.max(0, Math.min(100, gameState.facilityStatus.entropy + (updates.entropy || 0))),
         };
 
-        const newEntries = [];
+        // ⚡️ 修复：显式声明数组类型，防止 TypeScript 报错
+        const newEntries: string[] = [];
+        
         if (data.narrative) newEntries.push(`> ${data.narrative}`);
         if (data.system_action) newEntries.push(`:: CORE PROTOCOL :: ${data.system_action}`);
 
@@ -92,9 +94,8 @@ export default function Home() {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  // === 新的深灰色系 UI ===
+  // === UI 渲染 ===
   return (
-    // 背景改为深岩灰 slate-900，文字改为冷白 slate-200
     <main className="flex h-screen w-full bg-slate-900 text-slate-200 font-mono overflow-hidden relative bg-[url('/subtle-grid.png')]">
       
       {/* 左侧数据面板 - 深蓝灰色块 */}
@@ -104,7 +105,7 @@ export default function Home() {
             <Server size={24} />
             <h1 className="text-xl font-bold tracking-widest">PROJECT: GENESIS</h1>
           </div>
-          {/* AI 状态指示灯 - 颜色调整为更现代的风格 */}
+          {/* AI 状态指示灯 */}
           <div className="flex gap-2 mt-2 text-[10px] font-semibold tracking-wider">
             <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-orange-900/80 text-orange-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
               <Activity size={10}/> ANOMALY (RED)
@@ -118,7 +119,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 设施状态监控 - 使用蓝色和橙色 */}
+        {/* 设施状态监控 */}
         <div className="space-y-4">
           <div className="flex justify-between items-center text-sm">
             <span className="flex items-center gap-2 text-slate-400"><ShieldAlert size={14}/> STRUCTURE INTEGRITY</span>
@@ -134,7 +135,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 研究团队名单 - 更干净的卡片设计 */}
+        {/* 研究团队名单 */}
         <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
           {gameState.crew.map((c) => {
             const isStressed = c.stress > 70;
@@ -157,29 +158,26 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 右侧日志瀑布 - 更清晰的字体和颜色 */}
+      {/* 右侧日志瀑布 */}
       <div className="flex-1 p-8 overflow-y-auto font-mono text-lg leading-relaxed bg-slate-900 custom-scrollbar" ref={scrollRef}>
         <div className="space-y-6 pb-32">
           {logs.map((log, i) => {
-            // 系统提示用冷蓝色
             const isSystem = log.startsWith("::") || log.startsWith("SYS:");
-            // 叙事文本用灰白色
             const isNarrative = log.startsWith(">");
-            // 对话文本（如果有的话）用浅蓝色
             const isDialogue = log.includes("]:");
             return (
               <div key={i} className={`
                 ${isSystem ? 'text-blue-400 font-bold border-l-2 border-blue-500 pl-4 text-base' : ''}
                 ${isNarrative ? 'text-slate-300 italic' : ''}
                 ${isDialogue ? 'text-cyan-300 pl-4' : ''}
-                ${!isSystem && !isNarrative && !isDialogue ? 'text-slate-500 text-sm' : ''} // 默认灰色
+                ${!isSystem && !isNarrative && !isDialogue ? 'text-slate-500 text-sm' : ''}
                 animate-in fade-in slide-in-from-bottom-1 duration-300
               `}>
                 {log}
               </div>
             );
           })}
-          {netStatus === 'PROCESSING' && <div className="text-blue-500/70 animate-pulse text-sm">> Analyzing experiment data...</div>}
+          {netStatus === 'PROCESSING' && <div className="text-blue-500/70 animate-pulse text-sm">&gt; Analyzing experiment data...</div>}
         </div>
       </div>
     </main>
