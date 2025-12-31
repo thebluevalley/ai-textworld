@@ -1,17 +1,14 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Shield, Crosshair, Trophy, Skull, Users, HeartPulse, Cpu, Activity } from 'lucide-react';
+import { Play, Pause, Map as MapIcon, Wifi, AlertTriangle, Shield, Crosshair, Trophy, Skull, Users, HeartPulse, Zap } from 'lucide-react';
 
 const TacticalViewport = dynamic(() => import('./components/TacticalViewport'), { ssr: false });
 
 const BASE_SPEED = 0.008; 
 const MAP_SIZE = 30;
 
-// ... WEAPON_STATS, OBSTACLES, INITIAL_UNITS 保持不变 (请保留 Turn 18 的代码) ...
-// 为了篇幅，这里假设你保留了上面的常量定义，只放组件主体修改
-
-// 🔴 请把上面的常量复制过来 🔴
+// === ⚔️ 武器参数 ===
 const WEAPON_STATS: any = {
   SNIPER:  { range: 30, damage: 120, cooldown: 3500, accuracy: 0.95, suppression: 80 }, 
   ASSAULT: { range: 10, damage: 20,  cooldown: 500,  accuracy: 0.75, suppression: 15 }, 
@@ -58,7 +55,7 @@ export default function Home() {
   useEffect(() => { unitsRef.current = units; }, [units]);
   useEffect(() => { units.forEach(u => targetsRef.current[u.id] = { x: u.x, y: u.y }); }, []);
 
-  // ... (保留 lineIntersectsRect, checkLineOfSight, isColliding 物理函数) ...
+  // 物理检测函数
   const lineIntersectsRect = (p1: any, p2: any, rect: any) => {
     const rx = rect.x + 0.05; const ry = rect.y + 0.05; const rw = rect.w - 0.1; const rh = rect.h - 0.1;
     const minX = Math.min(p1.x, p2.x); const maxX = Math.max(p1.x, p2.x);
@@ -80,9 +77,10 @@ export default function Home() {
     return false;
   };
 
-  // ... (保留 reflexInterval 战斗算法) ...
+  // === ⚡️ 战斗反射循环 ===
   useEffect(() => {
     if (!isPlaying) return;
+
     const reflexInterval = setInterval(() => {
       const currentUnits = unitsRef.current;
       const now = Date.now();
@@ -95,13 +93,16 @@ export default function Home() {
       nextUnits.forEach(attacker => {
         if (attacker.status === 'DEAD') return;
         let canSeeAnyone = false;
+        
         const baseStats = WEAPON_STATS[attacker.role] || WEAPON_STATS['ASSAULT'];
         let currentCooldown = baseStats.cooldown;
         let currentAccuracy = baseStats.accuracy;
         let suppressionPower = baseStats.suppression;
 
         if (attacker.tactic === 'RUSH') return; 
-        if (attacker.tactic === 'SUPPRESS') { currentCooldown *= 0.4; currentAccuracy *= 0.4; suppressionPower *= 1.5; }
+        if (attacker.tactic === 'SUPPRESS') {
+           currentCooldown *= 0.4; currentAccuracy *= 0.4; suppressionPower *= 1.5;
+        }
         const isSuppressed = (attacker.suppression || 0) > 50;
         if (isSuppressed) { currentCooldown *= 1.5; currentAccuracy *= 0.5; }
 
@@ -111,21 +112,28 @@ export default function Home() {
         nextUnits.forEach(target => {
           if (target.team === attacker.team || target.status === 'DEAD') return;
           const dist = Math.sqrt(Math.pow(attacker.x - target.x, 2) + Math.pow(attacker.y - target.y, 2));
+          
           if (dist < 35 && checkLineOfSight(attacker, target)) {
              currentlySpotted.add(target.id);
              canSeeAnyone = true;
+             
              if (now - (attacker.lastShot || 0) >= currentCooldown) {
-               if (dist <= baseStats.range) { if (dist < minDist) { minDist = dist; bestTarget = target; } }
+               if (dist <= baseStats.range) {
+                 if (dist < minDist) { minDist = dist; bestTarget = target; }
+               }
              }
           }
         });
 
-        if (attacker.tactic === 'SUPPRESS' && !canSeeAnyone) { attacker.tactic = 'MOVE'; }
+        if (attacker.tactic === 'SUPPRESS' && !canSeeAnyone) {
+           attacker.tactic = 'MOVE';
+        }
 
         if (bestTarget) {
           attacker.lastShot = now;
           hasUpdates = true;
           const isHit = Math.random() < currentAccuracy;
+          
           newAttacks.push({
             from: { x: attacker.x, y: attacker.y },
             to: { x: bestTarget.x, y: bestTarget.y },
@@ -134,7 +142,9 @@ export default function Home() {
             timestamp: now,
             isSuppressionFire: isSuppressed || attacker.tactic === 'SUPPRESS' 
           });
+
           bestTarget.suppression = Math.min(100, (bestTarget.suppression || 0) + suppressionPower);
+
           if (isHit) {
             let dmg = baseStats.damage;
             if (Math.random() > 0.9) dmg = Math.floor(dmg * 2.0); 
@@ -153,12 +163,21 @@ export default function Home() {
           }
         }
       });
-      nextUnits.forEach(u => { if (u.suppression > 0) u.suppression = Math.max(0, u.suppression - 2); });
+
+      nextUnits.forEach(u => {
+        if (u.suppression > 0) u.suppression = Math.max(0, u.suppression - 2); 
+      });
+
       setSpottedUnits(currentlySpotted);
-      if (hasUpdates || nextUnits.some(u => u.suppression > 0)) { setUnits(nextUnits); }
+
+      if (hasUpdates || nextUnits.some(u => u.suppression > 0)) {
+        setUnits(nextUnits);
+      }
       if (newAttacks.length > 0) setAttacks(prev => [...newAttacks, ...prev].slice(0, 30));
       if (newTexts.length > 0) setFloatingTexts(prev => [...prev, ...newTexts]);
+
     }, 200);
+
     return () => clearInterval(reflexInterval);
   }, [isPlaying]);
 
@@ -168,7 +187,13 @@ export default function Home() {
     setNetStatus('SENDING');
     const now = Date.now();
     const activeUnits = units.filter(u => u.status === 'ALIVE').map(u => ({
-        id: u.id, team: u.team, role: u.role, pos: {x: u.x, y: u.y}, hp: u.hp, suppression: u.suppression, visibleEnemies: [] // 视野在后端计算
+        id: u.id, 
+        team: u.team, 
+        role: u.role, 
+        pos: {x: u.x, y: u.y}, 
+        hp: u.hp, 
+        suppression: u.suppression, 
+        visibleEnemies: [] as any[] // ⚡️ 修复：这里强制转为 any[] 避免类型报错
     }));
     
     // 补充视野数据：前端计算并传给后端
@@ -217,7 +242,7 @@ export default function Home() {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [isPlaying]);
 
-  // ... (保留 animate 循环) ...
+  // 动画循环
   useEffect(() => {
     let frame: number;
     const animate = () => {
@@ -255,14 +280,9 @@ export default function Home() {
       <div className="flex-1 relative flex flex-col">
         <div className="h-14 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-6 z-20">
           <h1 className="text-lg font-bold text-white flex items-center gap-2">
-            <Cpu className="text-purple-500" />
-            DUAL CORE AI <span className="text-[10px] bg-purple-900 px-2 rounded">PVP MODE</span>
-            {netStatus === 'SENDING' && (
-              <div className="flex items-center gap-2 ml-2">
-                <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Activity size={10}/> BLUE</span>
-                <span className="text-[10px] bg-red-900 text-red-200 px-2 rounded animate-pulse flex items-center gap-1"><Activity size={10}/> RED</span>
-              </div>
-            )}
+            <Shield className="text-emerald-500" />
+            TACTICAL OPS <span className="text-[10px] bg-emerald-900 px-2 rounded">ADVANCED DOCTRINE</span>
+            {netStatus === 'SENDING' && <span className="text-[10px] bg-blue-900 text-blue-200 px-2 rounded animate-pulse flex items-center gap-1"><Wifi size={10}/> AI COMMANDING</span>}
           </h1>
           <button onClick={() => setIsPlaying(!isPlaying)} className="px-6 py-1.5 font-bold rounded bg-indigo-600 text-white hover:bg-indigo-500">
             {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? "PAUSE" : "START"}
@@ -274,9 +294,9 @@ export default function Home() {
            </div>
         </div>
       </div>
+
       <div className="w-80 bg-[#0f172a] border-l border-slate-800 flex flex-col z-30">
-        {/* ... (侧边栏代码保持不变) ... */}
-        {/* 为节省篇幅，请保留 Turn 18 的侧边栏 UI 代码 */}
+        {/* Blue Team */}
         <div className="flex-1 p-4 border-b border-slate-800 overflow-y-auto">
            <div className="flex justify-between items-center text-blue-400 font-bold mb-3 pb-1 border-b border-blue-900/50">
              <span className="flex items-center gap-2"><Users size={16}/> BLUE TEAM</span>
@@ -303,6 +323,7 @@ export default function Home() {
              ))}
            </div>
         </div>
+        {/* Red Team */}
         <div className="flex-1 p-4 overflow-y-auto">
            <div className="flex justify-between items-center text-red-400 font-bold mb-3 pb-1 border-b border-red-900/50">
              <span className="flex items-center gap-2"><Users size={16}/> RED TEAM</span>
