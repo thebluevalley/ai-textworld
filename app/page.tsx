@@ -1,45 +1,53 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Swords, Shield, Zap, Skull, Flame, Snowflake, Biohazard, Trophy, Activity, Dna } from 'lucide-react';
+import { 
+  Swords, Shield, Zap, Skull, Flame, Snowflake, Biohazard, Trophy, 
+  Activity, Dna, Leaf, Heart, Search, CloudRain, Sun, Wind
+} from 'lucide-react';
 
+// === 初始状态 ===
 const INITIAL_STATE = {
   tickCount: 0,
   // 环境
   environment: { 
-    type: '原始海洋', 
-    severity: 1 
+    type: '丰饶平原', 
+    resourceLevel: 8 // 1-10, 决定采集效率
   },
-  // 物种 A (玩家/红脑)
+  // 物种 A (红)
   speciesA: {
-    name: '深红掠食者',
-    population: 10000,
-    traits: ['尖刺外壳'],
-    status: '备战'
+    name: '赤红行军蚁',
+    population: 5000,
+    food: 5000, // 新增：食物/能量资源
+    traits: ['群体协作'],
+    action: 'OBSERVING', // 当前动作
+    status: 'STABLE'
   },
-  // 物种 B (对手/蓝脑)
+  // 物种 B (蓝)
   speciesB: {
-    name: '蔚蓝守护者',
-    population: 10000,
-    traits: ['快速游动'],
-    status: '备战'
+    name: '蓝纹硬壳蟹',
+    population: 5000,
+    food: 5000,
+    traits: ['几丁质甲壳'],
+    action: 'OBSERVING',
+    status: 'STABLE'
   },
   eventLog: [
-    "系统: 演化战场初始化完成。",
-    "纪元 0: 两个原始物种同时觉醒了。"
+    "系统: 生态监测链路已连接。",
+    "纪元 0: 投放初始物种样本，环境参数稳定。"
   ]
 };
 
 export default function Home() {
   const [gameState, setGameState] = useState(INITIAL_STATE);
   const [logs, setLogs] = useState<string[]>(INITIAL_STATE.eventLog);
-  const [netStatus, setNetStatus] = useState<'IDLE' | 'BATTLE'>('IDLE');
+  const [netStatus, setNetStatus] = useState<'IDLE' | 'SIMULATING'>('IDLE');
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs]);
 
   const runGameLoop = async () => {
-    setNetStatus('BATTLE');
+    setNetStatus('SIMULATING');
 
     try {
       const res = await fetch('/api/game-tick', {
@@ -50,49 +58,55 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         const updates = data.stateUpdates || {};
+        const upA = updates.speciesA || {};
+        const upB = updates.speciesB || {};
         
-        // 更新种群 (血量)
-        let popA = Math.max(0, gameState.speciesA.population + (updates.popA_change || 0));
-        let popB = Math.max(0, gameState.speciesB.population + (updates.popB_change || 0));
-        
-        // 更新特征库
-        const newTraitsA = [...gameState.speciesA.traits];
-        const newTraitsB = [...gameState.speciesB.traits];
-        if (updates.newTraitA && !newTraitsA.includes(updates.newTraitA)) newTraitsA.push(updates.newTraitA);
-        if (updates.newTraitB && !newTraitsB.includes(updates.newTraitB)) newTraitsB.push(updates.newTraitB);
+        // 计算新状态 (增加上下限限制)
+        const updateSpecies = (prevSpec: any, update: any, actionData: any) => {
+            let newPop = Math.max(0, prevSpec.population + (update.popChange || 0));
+            let newFood = Math.max(0, prevSpec.food + (update.foodChange || 0));
+            let newTraits = [...prevSpec.traits];
+            if (update.newTrait && !newTraits.includes(update.newTrait)) newTraits.push(update.newTrait);
+            
+            return {
+                ...prevSpec,
+                population: newPop,
+                food: newFood,
+                traits: newTraits,
+                action: actionData?.action || 'IDLE'
+            };
+        };
 
-        // 判定胜负
-        let statusA = '存活';
-        let statusB = '存活';
-        if (popA <= 0) statusA = '灭绝';
-        if (popB <= 0) statusB = '灭绝';
+        const newSpecA = updateSpecies(gameState.speciesA, upA, data.redAction);
+        const newSpecB = updateSpecies(gameState.speciesB, upB, data.blueAction);
 
         // 日志生成
         const newEntries: string[] = [];
-        newEntries.push(`⚔️ 第 ${gameState.tickCount + 1} 回合: ${data.battle_result.winner === 'DRAW' ? '平局' : data.battle_result.winner === 'A' ? '红方胜' : '蓝方胜'}`);
-        newEntries.push(`🔴 红方进化: [${updates.newTraitA}]`);
-        newEntries.push(`🔵 蓝方进化: [${updates.newTraitB}]`);
         if (data.narrative) newEntries.push(`> ${data.narrative}`);
         
+        // 关键事件高亮
+        if (data.redAction?.action === 'HUNT') newEntries.push(`⚔️ [红方] 发起了捕猎攻势!`);
+        if (data.blueAction?.action === 'HUNT') newEntries.push(`⚔️ [蓝方] 发起了捕猎攻势!`);
+        if (data.redAction?.action === 'EVOLVE') newEntries.push(`🧬 [红方] 突变: ${upA.newTrait}`);
+        if (data.blueAction?.action === 'EVOLVE') newEntries.push(`🧬 [蓝方] 突变: ${upB.newTrait}`);
+
         setLogs(prev => [...prev, ...newEntries]);
 
-        if (statusA !== '灭绝' && statusB !== '灭绝') {
+        if (newSpecA.population > 0 && newSpecB.population > 0) {
             setGameState(prev => ({
                 ...prev,
                 environment: data.new_environment || prev.environment,
-                speciesA: { ...prev.speciesA, population: popA, traits: newTraitsA, status: statusA },
-                speciesB: { ...prev.speciesB, population: popB, traits: newTraitsB, status: statusB },
+                speciesA: newSpecA,
+                speciesB: newSpecB,
                 tickCount: prev.tickCount + 1
             }));
-        } else {
-            setLogs(prev => [...prev, `🏆 游戏结束! 胜利者: ${popA > 0 ? '深红掠食者' : '蔚蓝守护者'}`]);
         }
       }
     } catch (e) { console.error(e); } 
     finally {
       setNetStatus('IDLE');
       if (gameState.speciesA.population > 0 && gameState.speciesB.population > 0) {
-          timerRef.current = setTimeout(runGameLoop, 8000); 
+          timerRef.current = setTimeout(runGameLoop, 6000); 
       }
     }
   };
@@ -102,137 +116,200 @@ export default function Home() {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  return (
-    // 浅色背景，深色文字，移除所有深色纹理层
-    <main className="flex h-screen w-full bg-gray-50 text-gray-800 font-mono overflow-hidden relative">
+  // 辅助组件：行动徽章
+  const ActionBadge = ({ action, color }: { action: string, color: string }) => {
+      const icons: any = {
+          'FORAGE': <Leaf size={14} />,
+          'HUNT': <Swords size={14} />,
+          'REPRODUCE': <Heart size={14} />,
+          'EVOLVE': <Dna size={14} />,
+          'IDLE': <Activity size={14} />
+      };
+      const labels: any = {
+          'FORAGE': '采集资源',
+          'HUNT': '捕猎进攻',
+          'REPRODUCE': '繁衍扩张',
+          'EVOLVE': '基因突变',
+          'IDLE': '观察中'
+      };
       
-      {/* 🔴 左侧：红方 (物种 A) - 浅红配色 */}
-      <div className="w-1/3 border-r border-gray-200 p-6 flex flex-col bg-white">
-        <div className="mb-6 border-b border-gray-100 pb-4">
-            <h2 className="text-3xl font-black text-red-700 tracking-tighter flex items-center gap-2">
-                <Swords size={32} className="text-red-600"/> 深红军团
-            </h2>
-            <div className="text-xs text-gray-500 font-bold mt-1">AI-MODEL: RED BRAIN</div>
-        </div>
-        
-        {/* 血条 A - 柔和红色 */}
-        <div className="mb-8 p-4 bg-red-50/50 rounded-xl">
-            <div className="flex justify-between text-red-700 font-bold mb-2 text-sm">
-                <span>种群数量</span>
-                <span>{gameState.speciesA.population}</span>
+      return (
+          <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border ${
+              color === 'red' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-blue-100 text-blue-700 border-blue-200'
+          }`}>
+              {icons[action] || icons['IDLE']}
+              {labels[action] || action}
+          </div>
+      );
+  };
+
+  return (
+    <main className="flex flex-col h-screen w-full bg-gray-50 text-slate-800 font-sans overflow-hidden">
+      
+      {/* 顶部：全球环境监测站 */}
+      <header className="bg-white border-b border-gray-200 p-4 shadow-sm z-20 flex justify-between items-center h-20">
+        <div className="flex items-center gap-4">
+            <div className="p-2 bg-slate-100 rounded-lg">
+                <Activity size={24} className="text-slate-600"/>
             </div>
-            <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-red-500 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesA.population / 200)}%`}}></div>
+            <div>
+                <h1 className="text-lg font-bold text-slate-900 leading-tight">PROJECT: EVO-WARS</h1>
+                <div className="text-xs text-slate-500 font-medium">Ecological Simulation System v2.0</div>
             </div>
         </div>
 
-        {/* 特征墙 A - 浅色标签 */}
-        <div className="flex-1 overflow-hidden">
-            <h3 className="text-sm text-gray-600 mb-3 font-bold flex gap-2 items-center"><Dna size={16}/> 进化特征</h3>
-            <div className="flex flex-wrap gap-2 content-start">
-                {gameState.speciesA.traits.map((t, i) => (
-                    <span key={i} className="px-3 py-1 bg-red-100 text-red-800 text-xs rounded-md font-medium">
-                        {t}
-                    </span>
-                ))}
-            </div>
-        </div>
-      </div>
-
-      {/* 🟢 中间：环境与日志 (裁判) - 纯白背景 */}
-      <div className="w-1/3 flex flex-col border-r border-gray-200 bg-white z-10 shadow-sm">
-        {/* 顶部环境卡片 - 极浅灰背景 */}
-        <div className="h-40 bg-gray-50 border-b border-gray-200 p-6 flex flex-col items-center justify-center text-center">
-            <div className="text-xs text-gray-500 uppercase tracking-widest mb-2 font-bold">Current Environment</div>
-            <div className="text-2xl text-gray-800 font-black flex items-center gap-3">
-                <span className="text-yellow-500">
-                {gameState.environment.type.includes('冰') ? <Snowflake/> : 
-                 gameState.environment.type.includes('火') ? <Flame/> : 
-                 gameState.environment.type.includes('毒') ? <Biohazard/> : <Zap/>}
-                 </span>
-                {gameState.environment.type}
-            </div>
-            <div className="text-xs text-gray-500 mt-2 bg-white px-3 py-1 rounded-full border">强度等级: {gameState.environment.severity}</div>
-            {netStatus === 'BATTLE' && <div className="mt-2 text-xs text-green-600 animate-pulse font-bold">正在推演战局...</div>}
-        </div>
-
-        {/* 滚动日志 - 浅色条目 */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-white" ref={scrollRef}>
-            {logs.map((log, i) => {
-                const isRedWin = log.includes("红方胜");
-                const isBlueWin = log.includes("蓝方胜");
-                const isNarrative = log.startsWith(">");
-                const isRedMove = log.includes("红方进化");
-                const isBlueMove = log.includes("蓝方进化");
-                
-                return (
-                    <div key={i} className={`
-                        text-sm leading-relaxed border-l-4 pl-3 py-2 rounded-r-md font-medium
-                        ${isRedWin ? 'border-red-500 text-red-800 bg-red-50' : ''}
-                        ${isBlueWin ? 'border-blue-500 text-blue-800 bg-blue-50' : ''}
-                        ${isNarrative ? 'border-gray-400 text-gray-600 italic bg-gray-50 font-normal' : ''}
-                        ${isRedMove ? 'border-red-300 text-red-600 text-xs bg-white' : ''}
-                        ${isBlueMove ? 'border-blue-300 text-blue-600 text-xs bg-white' : ''}
-                        ${!isRedWin && !isBlueWin && !isNarrative && !isRedMove && !isBlueMove ? 'border-gray-300 text-gray-500 text-xs bg-white' : ''}
-                    `}>
-                        {log}
-                    </div>
-                );
-            })}
-        </div>
-      </div>
-
-      {/* 🔵 右侧：蓝方 (物种 B) - 浅蓝配色 */}
-      <div className="w-1/3 p-6 flex flex-col bg-white text-right">
-        <div className="mb-6 border-b border-gray-100 pb-4">
-            <h2 className="text-3xl font-black text-blue-700 tracking-tighter flex items-center justify-end gap-2">
-                蔚蓝神族 <Shield size={32} className="text-blue-600"/>
-            </h2>
-            <div className="text-xs text-gray-500 font-bold mt-1">AI-MODEL: BLUE BRAIN</div>
-        </div>
-        
-        {/* 血条 B - 柔和蓝色 */}
-        <div className="mb-8 p-4 bg-blue-50/50 rounded-xl">
-            <div className="flex justify-between text-blue-700 font-bold mb-2 text-sm flex-row-reverse">
-                <span>种群数量</span>
-                <span>{gameState.speciesB.population}</span>
-            </div>
-            <div className="h-3 bg-gray-200 rounded-full overflow-hidden transform rotate-180">
-                <div className="h-full bg-blue-500 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesB.population / 200)}%`}}></div>
-            </div>
-        </div>
-
-        {/* 特征墙 B - 浅色标签 */}
-        <div className="flex-1 overflow-hidden">
-            <h3 className="text-sm text-gray-600 mb-3 font-bold flex gap-2 justify-end items-center">进化特征 <Dna size={16}/></h3>
-            <div className="flex flex-wrap gap-2 content-start justify-end">
-                {gameState.speciesB.traits.map((t, i) => (
-                    <span key={i} className="px-3 py-1 bg-blue-100 text-blue-800 text-xs rounded-md font-medium">
-                        {t}
-                    </span>
-                ))}
-            </div>
-        </div>
-      </div>
-
-      {/* 胜利结算弹窗 - 浅色风格 */}
-      {(gameState.speciesA.population <= 0 || gameState.speciesB.population <= 0) && (
-        <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-50 backdrop-blur-sm">
-            <div className="bg-white border border-gray-200 p-12 text-center rounded-2xl shadow-xl">
-                <Trophy size={64} className="text-yellow-500 mx-auto mb-6"/>
-                <h1 className="text-4xl font-black text-gray-900 mb-4">演化战争结束</h1>
-                <div className="text-2xl mb-10 text-gray-700 font-bold">
-                    获胜者: <span className={gameState.speciesA.population > 0 ? "text-red-600" : "text-blue-600"}>
-                        {gameState.speciesA.population > 0 ? "深红军团" : "蔚蓝神族"}
-                    </span>
+        {/* 环境状态卡片 */}
+        <div className="flex items-center gap-6 bg-slate-50 px-6 py-2 rounded-full border border-slate-100">
+             <div className="flex flex-col items-center">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Environment</span>
+                <div className="flex items-center gap-2 font-bold text-slate-700">
+                    {gameState.environment.type.includes('雨') ? <CloudRain size={16}/> : <Sun size={16}/>}
+                    {gameState.environment.type}
                 </div>
-                <button onClick={() => window.location.reload()} className="px-8 py-4 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-full transition-colors shadow-md">
-                    开启新的纪元
-                </button>
-            </div>
+             </div>
+             <div className="w-px h-8 bg-slate-200"></div>
+             <div className="flex flex-col items-center w-24">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Resources</span>
+                <div className="w-full h-2 bg-slate-200 rounded-full mt-1 overflow-hidden">
+                    <div className="h-full bg-green-500 transition-all duration-500" style={{width: `${gameState.environment.resourceLevel * 10}%`}}></div>
+                </div>
+             </div>
+             <div className="w-px h-8 bg-slate-200"></div>
+             <div className="flex flex-col items-center">
+                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Epoch</span>
+                 <span className="font-mono font-bold text-slate-700">{gameState.tickCount}</span>
+             </div>
         </div>
-      )}
 
+        <div className="w-32 flex justify-end">
+            {netStatus === 'SIMULATING' && (
+                <span className="flex items-center gap-2 text-xs text-emerald-600 font-medium bg-emerald-50 px-3 py-1 rounded-full animate-pulse">
+                    <Activity size={12}/> 计算中...
+                </span>
+            )}
+        </div>
+      </header>
+
+      {/* 主体内容区 */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* 左侧：红方面板 */}
+        <section className="flex-1 p-6 flex flex-col gap-4 border-r border-gray-200 bg-white">
+            <div className="flex justify-between items-start">
+                <div>
+                    <h2 className="text-2xl font-black text-slate-800">{gameState.speciesA.name}</h2>
+                    <div className="text-xs text-red-500 font-bold mt-1">RED SPECIES</div>
+                </div>
+                <ActionBadge action={gameState.speciesA.action} color="red" />
+            </div>
+
+            {/* 数据仪表 */}
+            <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                        <span>POPULATION (种群)</span>
+                        <span>{gameState.speciesA.population}</span>
+                    </div>
+                    <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-red-500 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesA.population / 100)}%`}}></div>
+                    </div>
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                        <span>RESERVES (食物/能量)</span>
+                        <span>{gameState.speciesA.food}</span>
+                    </div>
+                    <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-400 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesA.food / 100)}%`}}></div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 特征列表 */}
+            <div className="flex-1 overflow-hidden">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Evolutionary Traits</h3>
+                <div className="flex flex-wrap gap-2 content-start">
+                    {gameState.speciesA.traits.map((t, i) => (
+                        <span key={i} className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs rounded-lg shadow-sm font-medium">
+                            {t}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        </section>
+
+        {/* 中间：科研日志 */}
+        <section className="w-[40%] bg-gray-50 flex flex-col border-r border-gray-200">
+            <div className="p-3 border-b border-gray-200 bg-white text-xs font-bold text-slate-400 uppercase tracking-widest text-center">
+                Observation Log
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar" ref={scrollRef}>
+                {logs.map((log, i) => {
+                    const isNarrative = log.startsWith(">");
+                    const isBattle = log.includes("捕猎");
+                    const isEvolve = log.includes("突变");
+                    
+                    return (
+                        <div key={i} className={`
+                            text-sm py-2 px-3 rounded border
+                            ${isBattle ? 'bg-red-50 border-red-100 text-red-800' : ''}
+                            ${isEvolve ? 'bg-indigo-50 border-indigo-100 text-indigo-800' : ''}
+                            ${isNarrative ? 'bg-white border-slate-200 text-slate-600 italic shadow-sm' : ''}
+                            ${!isBattle && !isEvolve && !isNarrative ? 'bg-transparent border-transparent text-slate-400 text-xs' : ''}
+                        `}>
+                            {log}
+                        </div>
+                    );
+                })}
+            </div>
+        </section>
+
+        {/* 右侧：蓝方面板 */}
+        <section className="flex-1 p-6 flex flex-col gap-4 bg-white">
+             <div className="flex justify-between items-start flex-row-reverse">
+                <div className="text-right">
+                    <h2 className="text-2xl font-black text-slate-800">{gameState.speciesB.name}</h2>
+                    <div className="text-xs text-blue-500 font-bold mt-1">BLUE SPECIES</div>
+                </div>
+                <ActionBadge action={gameState.speciesB.action} color="blue" />
+            </div>
+
+            {/* 数据仪表 */}
+            <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1 flex-row-reverse">
+                        <span>POPULATION (种群)</span>
+                        <span>{gameState.speciesB.population}</span>
+                    </div>
+                    <div className="h-3 bg-gray-200 rounded-full overflow-hidden transform rotate-180">
+                        <div className="h-full bg-blue-500 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesB.population / 100)}%`}}></div>
+                    </div>
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-1 flex-row-reverse">
+                        <span>RESERVES (食物/能量)</span>
+                        <span>{gameState.speciesB.food}</span>
+                    </div>
+                    <div className="h-3 bg-gray-200 rounded-full overflow-hidden transform rotate-180">
+                        <div className="h-full bg-amber-400 transition-all duration-700" style={{width: `${Math.min(100, gameState.speciesB.food / 100)}%`}}></div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 特征列表 */}
+            <div className="flex-1 overflow-hidden">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 text-right">Evolutionary Traits</h3>
+                <div className="flex flex-wrap gap-2 content-start justify-end">
+                    {gameState.speciesB.traits.map((t, i) => (
+                        <span key={i} className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs rounded-lg shadow-sm font-medium">
+                            {t}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        </section>
+
+      </div>
     </main>
   );
 }
