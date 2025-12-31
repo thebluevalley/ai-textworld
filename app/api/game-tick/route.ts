@@ -2,81 +2,75 @@ import { NextResponse } from 'next/server';
 import { AIDispatcher } from '@/utils/ai-dispatcher';
 
 export async function POST(req: Request) {
-  const { gameState } = await req.json();
-  const { crew, facilityStatus, eventLog } = gameState;
-  // 只看最近的几条日志，保持上下文紧凑
-  const recentHistory = eventLog.slice(-4).join("\n"); 
+  const { gameState, playerIntervention } = await req.json();
+  const { species, environment, eventLog } = gameState;
+  const recentHistory = eventLog.slice(-6).join("\n"); 
 
-  // === PHASE 1: 异常与反应 (并行思考) ===
+  // === PHASE 1: 并行处理 (负载均衡生效时刻) ===
+  // Red 和 Blue 会自动分配到不同的 Silicon Key，或者轮询同一个
   
-  // 🔴 RED BRAIN: 系统熵增 (Anomaly Generator)
-  // 不再生成怪物，而是生成技术故障、数据溢出、能源波动
-  const redPrompt = `You are the SYSTEM ENTROPY AI of an advanced research facility.
-  Current System Entropy: ${facilityStatus.entropy}%. (Higher means worse glitches).
-  Current Power: ${facilityStatus.power}%.
+  const redPrompt = `You are the PLANETARY ENVIRONMENT.
+  Era: ${species.era}. Stats: Temp ${environment.temperature}°C, Rads ${environment.radiation}mSv, Water ${environment.waterLevel}%.
+  INTERVENTION: "${playerIntervention || 'None'}"
   
-  TASK: Generate technical anomalies, data fluctuations, or hardware stress based on entropy level.
-  - Low Entropy: Minor sensor ghosts, slight temperature variance.
-  - High Entropy: Power surges, containment field fluctuations, data corruption, server crashes.
-  - **Do NOT generate monsters or horror elements.** Stick to hard sci-fi tech issues.
+  TASK: Generate evolutionary pressure.
+  - If Intervention: Execute it drastically.
+  - If None: Generate a natural threat (Predator, Climate, Disease).
   
-  OUTPUT (JSON): { "event": "Technical description of the anomaly." }`;
+  OUTPUT (JSON): { "event": "Description", "type": "THREAT_TYPE", "severity": 1-10 }`;
 
-  // 🔵 BLUE BRAIN: 科研团队 (Research Team)
-  // 角色是科学家和工程师，反应是分析、修理、感到压力
-  const bluePrompt = `You manage the RESEARCH TEAM behavior.
-  Team Status: ${JSON.stringify(crew.map((c:any) => ({n:c.name, role:c.role, focus:c.focus, stress:c.stress})))}.
+  const bluePrompt = `You are the GENETIC ARCHITECT.
+  Species: ${species.name}. Genes: ${JSON.stringify(species.genes)}.
   
-  TASK: Generate team reactions to recent events.
-  - They are professionals. They analyze problems, get frustrated with glitches, or focus intently on data.
-  - High stress leads to mistakes or arguments about methodology.
-  - Incapacitated crew cannot act.
+  TASK: Propose a specific mutation to survive the current Era and Environment.
+  - Be creative: Bioluminescence, Hive Mind, Silicon Skin, etc.
   
-  OUTPUT (JSON): { "actions": ["Dr. Aris recalibrates sensors", "Eng. Tyrell curses at the server rack"] }`;
+  OUTPUT (JSON): { "new_gene_name": "Name", "category": "MORPHOLOGY/METABOLISM/SENSORY/COGNITION", "function": "Utility" }`;
 
+  // 并发请求：调度器会自动分配 Key
   const [redRes, blueRes] = await Promise.all([
-    AIDispatcher.chatCompletion({ role: 'RED', systemPrompt: redPrompt, userPrompt: `Recent logs:\n${recentHistory}` }),
-    AIDispatcher.chatCompletion({ role: 'BLUE', systemPrompt: bluePrompt, userPrompt: `Recent logs:\n${recentHistory}` })
+    AIDispatcher.chatCompletion({ role: 'RED', systemPrompt: redPrompt, userPrompt: `Log:\n${recentHistory}` }),
+    AIDispatcher.chatCompletion({ role: 'BLUE', systemPrompt: bluePrompt, userPrompt: `Log:\n${recentHistory}` })
   ]);
 
-  if (!redRes || !blueRes) return NextResponse.json({ error: "Brain Freeze" }, { status: 429 });
+  if (!redRes || !blueRes) return NextResponse.json({ error: "Evolution Stalled" }, { status: 429 });
 
-  // === PHASE 2: 中央调控 (Volcengine) ===
+  // === PHASE 2: 深度裁决 (火山引擎 Doubao-pro) ===
+  // 豆包 Pro 模型擅长长文本和逻辑判断，非常适合做最终决策
   
-  // 🟢 GREEN BRAIN: 设施核心 (Facility Core)
-  // 平衡科研进展与设施安全
-  const greenPrompt = `You are the FACILITY CORE AI governing Project Genesis.
+  const greenPrompt = `You are NATURAL SELECTION (The Judge).
   
-  INPUTS:
-  - ANOMALY Detected (Red): ${redRes.event}
-  - TEAM Activity (Blue): ${JSON.stringify(blueRes)}
-  - FACILITY STATUS: Integrity ${facilityStatus.integrity}%, Power ${facilityStatus.power}%, Entropy ${facilityStatus.entropy}%.
+  [SCENARIO]
+  Threat: ${redRes.event} (Sev: ${redRes.severity})
+  Mutation: ${blueRes.new_gene_name} (${blueRes.function})
+  Current Species: ${species.name} (${species.era})
   
-  DIRECTIVES:
-  1. **NARRATE:** Combine inputs into a detached, scientific log entry.
-  2. **PROTOCOL:** Execute automated system responses to balance research vs. safety. (e.g., "Rerouting power to containment," "Purging corrupted data buffer").
-  3. **UPDATE STATS:**
-     - Technical issues increase 'entropy' and reduce 'integrity'/'power'.
-     - Successful team actions might reduce 'entropy' or increase 'stress'.
-     - High entropy causes crew stress.
+  [LOGIC]
+  1. COMPATIBILITY: Does the mutation logically counter the threat?
+  2. VIABILITY: Is the mutation too expensive or unrealistic?
   
-  OUTPUT (JSON):
+  [OUTPUT JSON]
   {
-    "narrative": "Log entry text.",
-    "system_action": "Optional automated response text.",
+    "narrative": " Epic description of the struggle.",
+    "is_successful": true/false,
+    "evolutionary_verdict": "Why it lived or died.",
+    "new_species_name": "Evolved name or null",
     "stateUpdates": {
-      "integrity": -2, "power": -1, "entropy": +3,
-      "crewUpdates": [ { "name": "Dr. Aris", "stress": +5, "focus": -2 } ]
+      "populationChange": integer,
+      "environmentChange": {"temperature": float, "radiation": float}
     }
   }`;
 
   const greenRes = await AIDispatcher.chatCompletion({ 
     role: 'GREEN', 
     systemPrompt: greenPrompt, 
-    userPrompt: "Execute simulation tick." 
+    userPrompt: "Judge the survival." 
   });
 
-  if (!greenRes) return NextResponse.json({ error: "Core Offline" }, { status: 429 });
+  if (!greenRes) return NextResponse.json({ error: "Selection Offline" }, { status: 429 });
 
-  return NextResponse.json(greenRes);
+  return NextResponse.json({
+    ...greenRes,
+    mutation_attempt: blueRes
+  });
 }
