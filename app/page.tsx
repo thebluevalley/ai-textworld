@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Terminal, Activity, AlertTriangle, ShieldAlert, Cpu, HeartPulse, Brain, Skull } from 'lucide-react';
+// ⬇️ 修复：确保导入了 Users 图标，解决构建报错
+import { Play, Pause, Terminal, Activity, AlertTriangle, ShieldAlert, Cpu, HeartPulse, Brain, Skull, Users } from 'lucide-react';
 
 // === 初始游戏状态 ===
 const INITIAL_STATE = {
@@ -194,6 +195,7 @@ export default function Home() {
             <div key={c.name} className={`border p-3 flex flex-col gap-1 transition-all ${c.status === 'DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-green-800 bg-green-900/10'}`}>
               <div className="flex justify-between items-center">
                 <span className="font-bold flex items-center gap-2">
+                  {/* 这里使用了 Users 图标 */}
                   {c.status === 'DEAD' ? <Skull size={14}/> : <Users size={14}/>} {c.name}
                 </span>
                 <span className="text-xs bg-green-900 px-1">{c.role}</span>
