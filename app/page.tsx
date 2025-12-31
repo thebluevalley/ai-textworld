@@ -1,273 +1,187 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Terminal, Activity, AlertTriangle, ShieldAlert, Cpu, HeartPulse, Brain, Skull, Users } from 'lucide-react';
+import { Terminal, Activity, Cpu, Brain, Users, Radio, Server, Zap, Database } from 'lucide-react';
 
-// === 初始游戏状态 ===
+// === 新设定：高科技研究设施 ===
 const INITIAL_STATE = {
   tickCount: 0,
-  isPlaying: false,
-  isWaitingForDecision: false, // 决策锁
-  
-  // 飞船状态
-  shipStatus: {
-    hull: 100,
-    oxygen: 98,
-    danger: 10, // 危机值
+  // 设施状态
+  facilityStatus: { 
+    integrity: 100, // 结构完整性
+    power: 98,      // 能源稳定性
+    entropy: 5      // 系统熵值 (混乱度)
   },
-
-  // 船员名单 (带有人设)
+  // 研究团队
   crew: [
-    { name: 'Capt. Miller', role: 'Commander', status: 'ALIVE', hp: 100, sanity: 90, location: 'BRIDGE', traits: 'Stoic, Decisive' },
-    { name: 'Dr. Chen', role: 'Scientist', status: 'ALIVE', hp: 80, sanity: 95, location: 'LAB', traits: 'Curious, Cold' },
-    { name: 'Eng. Isaac', role: 'Engineer', status: 'ALIVE', hp: 90, sanity: 60, location: 'ENGINE', traits: 'Anxious, Skilled' },
-    { name: 'Sgt. Vance', role: 'Security', status: 'ALIVE', hp: 120, sanity: 80, location: 'ARMORY', traits: 'Aggressive, Loyal' },
-    { name: 'Unit 734', role: 'Android', status: 'ALIVE', hp: 200, sanity: 100, location: 'HALLWAY', traits: 'Robotic, Obedient' },
+    { name: 'Dr. Aris', role: 'Lead Scientist', status: 'ACTIVE', focus: 95, stress: 20, location: 'CORE LAB' },
+    { name: 'Dr. Beryl', role: 'Quantum Phys', status: 'ACTIVE', focus: 90, stress: 15, location: 'DATA CTR' },
+    { name: 'Eng. Tyrell', role: 'Sys Admin', status: 'ACTIVE', focus: 85, stress: 30, location: 'SERVER RM' },
+    { name: 'Spec. Vance', role: 'Hardware Ops', status: 'ACTIVE', focus: 90, stress: 25, location: 'POWER GRID' },
+    { name: 'Unit 734', role: 'Research Bot', status: 'ONLINE', focus: 100, stress: 0, location: 'HALLWAY' },
   ],
-
-  // 历史日志 (记忆核心)
-  eventLog: [
-    "SYSTEM: Protocol Zero Initiated.",
-    "SYSTEM: Day 42. Deep space silence.",
-    "SYSTEM: Bio-scan active. All crew signs normal."
-  ] as string[],
-
-  // 当前待处理的决策
-  currentDecision: null as any
+  eventLog: ["SYS: Project Genesis initialized.", "SYS: Tri-Core connection stable.", "SYS: Awaiting experimental data."]
 };
 
 export default function Home() {
   const [gameState, setGameState] = useState(INITIAL_STATE);
   const [logs, setLogs] = useState<string[]>(INITIAL_STATE.eventLog);
-  const [netStatus, setNetStatus] = useState<'IDLE' | 'THINKING'>('IDLE');
+  const [netStatus, setNetStatus] = useState<'IDLE' | 'PROCESSING'>('IDLE');
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 自动滚动日志
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logs]);
 
-  // === 核心循环：叙事生成 ===
+  // === 全自动循环 (逻辑保持不变，只改变显示) ===
   const runGameLoop = async () => {
-    if (!gameState.isPlaying || gameState.isWaitingForDecision) return;
-    
-    setNetStatus('THINKING');
+    setNetStatus('PROCESSING');
 
     try {
       const res = await fetch('/api/game-tick', {
         method: 'POST',
-        body: JSON.stringify({ gameState: { ...gameState, eventLog: logs } }) // 把记忆发给 AI
+        body: JSON.stringify({ gameState: { ...gameState, eventLog: logs } })
       });
-
-      if (res.status === 429) {
-        timerRef.current = setTimeout(runGameLoop, 5000);
-        return;
-      }
 
       if (res.ok) {
         const data = await res.json();
         
-        // 1. 处理状态更新 (State Updates)
         const updates = data.stateUpdates || {};
         const newCrew = gameState.crew.map(member => {
-          const memberUpdate = updates.crewUpdates?.find((u:any) => u.name === member.name);
-          if (memberUpdate) {
-            // 合并属性，处理死亡逻辑
-            const newHp = memberUpdate.hp !== undefined ? member.hp + memberUpdate.hp : member.hp;
-            const newSanity = memberUpdate.sanity !== undefined ? member.sanity + memberUpdate.sanity : member.sanity;
-            const newStatus = newHp <= 0 ? 'DEAD' : (memberUpdate.status || member.status);
-            return { ...member, ...memberUpdate, hp: newHp, sanity: newSanity, status: newStatus };
+          const u = updates.crewUpdates?.find((x:any) => x.name === member.name);
+          if (u) {
+            // 更新专注度和压力值
+            const newFocus = Math.max(0, Math.min(100, member.focus + (u.focus || 0)));
+            const newStress = Math.max(0, Math.min(100, member.stress + (u.stress || 0)));
+            // 如果压力过大，状态变为 INCAPACITATED (丧失工作能力)，而不是死亡
+            let newStatus = u.status || member.status;
+            if (newStress >= 100) newStatus = 'INCAPACITATED';
+            if (newStress < 80 && newStatus === 'INCAPACITATED') newStatus = 'ACTIVE';
+
+            return { ...member, ...u, focus: newFocus, stress: newStress, status: newStatus };
           }
           return member;
         });
 
-        const newShipStatus = {
-          hull: Math.max(0, gameState.shipStatus.hull + (updates.hull || 0)),
-          oxygen: Math.max(0, gameState.shipStatus.oxygen + (updates.oxygen || 0)),
-          danger: Math.max(0, Math.min(100, gameState.shipStatus.danger + (updates.danger || 0))),
+        const newFacilityStatus = {
+          integrity: Math.max(0, gameState.facilityStatus.integrity + (updates.integrity || 0)),
+          power: Math.max(0, gameState.facilityStatus.power + (updates.power || 0)),
+          // 熵值增加
+          entropy: Math.max(0, Math.min(100, gameState.facilityStatus.entropy + (updates.entropy || 0))),
         };
 
-        // 2. 处理日志和对话
-        const newLogEntries: string[] = [];
-        if (data.narrative) newLogEntries.push(`> ${data.narrative}`);
-        if (data.dialogues) {
-          data.dialogues.forEach((d:any) => newLogEntries.push(`[${d.name}]: "${d.text}"`));
-        }
+        const newEntries = [];
+        if (data.narrative) newEntries.push(`> ${data.narrative}`);
+        if (data.system_action) newEntries.push(`:: CORE PROTOCOL :: ${data.system_action}`);
 
-        // 3. 检查是否需要玩家决策
-        const decision = data.decision;
-        const isDecisionRequired = decision && decision.required;
-
-        setLogs(prev => [...prev, ...newLogEntries]);
+        setLogs(prev => [...prev, ...newEntries]);
         setGameState(prev => ({
           ...prev,
           crew: newCrew,
-          shipStatus: newShipStatus,
-          isWaitingForDecision: isDecisionRequired,
-          currentDecision: decision,
+          facilityStatus: newFacilityStatus,
           tickCount: prev.tickCount + 1
         }));
-
-        setNetStatus('IDLE');
-
-        // 如果不需要决策，继续循环；如果需要，暂停等待
-        if (!isDecisionRequired) {
-          timerRef.current = setTimeout(runGameLoop, 6000); // 6秒一回合，阅读时间
-        }
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e) { console.error(e); } 
+    finally {
+      setNetStatus('IDLE');
       timerRef.current = setTimeout(runGameLoop, 5000);
     }
   };
 
-  // 玩家做出选择
-  const handleChoice = (option: any) => {
-    // 将玩家的选择写入日志，作为新的“记忆”
-    const choiceLog = `:: OVERSEER COMMAND :: ${option.text}`;
-    setLogs(prev => [...prev, choiceLog]);
-    
-    // 恢复运行
-    setGameState(prev => ({
-      ...prev,
-      isWaitingForDecision: false,
-      currentDecision: null
-    }));
-    
-    // 立即触发下一轮，让 AI 反应玩家的决定
-    setTimeout(runGameLoop, 500); 
-  };
-
   useEffect(() => {
-    if (gameState.isPlaying && !gameState.isWaitingForDecision) {
-      runGameLoop();
-    } else {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    }
+    runGameLoop();
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [gameState.isPlaying, gameState.isWaitingForDecision]);
+  }, []);
 
-  // === UI 渲染 ===
+  // === 新的深灰色系 UI ===
   return (
-    <main className="flex h-screen w-full bg-black text-green-500 font-mono overflow-hidden relative">
+    // 背景改为深岩灰 slate-900，文字改为冷白 slate-200
+    <main className="flex h-screen w-full bg-slate-900 text-slate-200 font-mono overflow-hidden relative bg-[url('/subtle-grid.png')]">
       
-      {/* 扫描线特效层 */}
-      <div className="absolute inset-0 pointer-events-none z-50 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-20" />
-
-      {/* 左侧：数据监视器 */}
-      <div className="w-1/3 border-r border-green-900 p-6 flex flex-col gap-6 bg-black/90 z-10">
-        <div className="flex items-center gap-2 border-b border-green-800 pb-4">
-          <Terminal size={24} />
-          <h1 className="text-xl font-bold tracking-widest">PROTOCOL: OVERSEER</h1>
-          {netStatus === 'THINKING' && <span className="animate-pulse text-xs bg-green-900 px-2 py-0.5 rounded">PROCESSING</span>}
+      {/* 左侧数据面板 - 深蓝灰色块 */}
+      <div className="w-1/3 border-r border-slate-700/50 p-6 flex flex-col gap-6 bg-slate-800/50 backdrop-blur-sm z-10 shadow-xl">
+        <div className="flex flex-col gap-1 border-b border-slate-700 pb-4">
+          <div className="flex items-center gap-2 text-blue-400">
+            <Server size={24} />
+            <h1 className="text-xl font-bold tracking-widest">PROJECT: GENESIS</h1>
+          </div>
+          {/* AI 状态指示灯 - 颜色调整为更现代的风格 */}
+          <div className="flex gap-2 mt-2 text-[10px] font-semibold tracking-wider">
+            <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-orange-900/80 text-orange-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
+              <Activity size={10}/> ANOMALY (RED)
+            </span>
+            <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-blue-900/80 text-blue-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
+              <Users size={10}/> RESEARCH (BLUE)
+            </span>
+            <span className={`px-2 py-1 rounded-sm flex items-center gap-1 ${netStatus==='PROCESSING'?'bg-emerald-900/80 text-emerald-200 animate-pulse':'bg-slate-700 text-slate-400'}`}>
+              <Radio size={10}/> CORE (VOLC)
+            </span>
+          </div>
         </div>
 
-        {/* 飞船状态 */}
+        {/* 设施状态监控 - 使用蓝色和橙色 */}
         <div className="space-y-4">
-          <h2 className="text-sm text-green-700 font-bold mb-2">SHIP INTEGRITY</h2>
-          <div className="flex justify-between items-center">
-            <span>HULL</span>
-            <div className="w-48 h-3 bg-green-900/30 border border-green-800">
-              <div className="h-full bg-green-600" style={{width: `${gameState.shipStatus.hull}%`}}></div>
-            </div>
+          <div className="flex justify-between items-center text-sm">
+            <span className="flex items-center gap-2 text-slate-400"><ShieldAlert size={14}/> STRUCTURE INTEGRITY</span>
+            <div className="w-32 h-2 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${gameState.facilityStatus.integrity}%`}}></div></div>
           </div>
-          <div className="flex justify-between items-center">
-            <span>O2 LEVEL</span>
-            <div className="w-48 h-3 bg-green-900/30 border border-green-800">
-              <div className="h-full bg-cyan-600" style={{width: `${gameState.shipStatus.oxygen}%`}}></div>
-            </div>
+          <div className="flex justify-between items-center text-sm">
+            <span className="flex items-center gap-2 text-slate-400"><Zap size={14}/> POWER GRID STABILITY</span>
+            <div className="w-32 h-2 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-cyan-500" style={{width: `${gameState.facilityStatus.power}%`}}></div></div>
           </div>
-          <div className="flex justify-between items-center text-red-500">
-            <span className="flex items-center gap-2"><AlertTriangle size={14}/> THREAT</span>
-            <div className="w-48 h-3 bg-red-900/30 border border-red-800">
-              <div className="h-full bg-red-600" style={{width: `${gameState.shipStatus.danger}%`}}></div>
-            </div>
+          <div className="flex justify-between items-center text-orange-400 text-sm font-bold">
+            <span className="flex items-center gap-2"><Database size={14}/> SYSTEM ENTROPY</span>
+            <span>{gameState.facilityStatus.entropy.toFixed(1)}%</span>
           </div>
         </div>
 
-        {/* 船员状态卡片 */}
-        <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-          <h2 className="text-sm text-green-700 font-bold mb-2">CREW VITALS</h2>
-          {gameState.crew.map((c) => (
-            <div key={c.name} className={`border p-3 flex flex-col gap-1 transition-all ${c.status === 'DEAD' ? 'border-red-900 opacity-50 grayscale' : 'border-green-800 bg-green-900/10'}`}>
-              <div className="flex justify-between items-center">
-                <span className="font-bold flex items-center gap-2">
-                  {c.status === 'DEAD' ? <Skull size={14}/> : <Users size={14}/>} {c.name}
-                </span>
-                <span className="text-xs bg-green-900 px-1">{c.role}</span>
+        {/* 研究团队名单 - 更干净的卡片设计 */}
+        <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+          {gameState.crew.map((c) => {
+            const isStressed = c.stress > 70;
+            const isDown = c.status !== 'ACTIVE' && c.status !== 'ONLINE';
+            return (
+            <div key={c.name} className={`p-3 rounded-md flex justify-between items-center border transition-all ${isDown ? 'border-orange-900/50 bg-orange-900/10 text-orange-300' : 'border-slate-700 bg-slate-800/80'}`}>
+              <div>
+                <div className="font-bold text-sm flex items-center gap-2">
+                  {c.role.includes('Bot') ? <Cpu size={14}/> : <Users size={14}/>} {c.name}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">{c.role} | <span className="text-blue-300">{c.location}</span></div>
               </div>
-              <div className="flex justify-between text-xs text-green-600 mt-1">
-                <span className="flex items-center gap-1"><HeartPulse size={10}/> HP: {c.hp}</span>
-                <span className="flex items-center gap-1"><Brain size={10}/> SAN: {c.sanity}</span>
+              <div className="text-right text-xs flex flex-col gap-1">
+                <div className="text-blue-400">FOCUS: {c.focus}%</div>
+                <div className={`${isStressed ? 'text-orange-400 font-bold' : 'text-slate-400'}`}>STRESS: {c.stress}%</div>
+                {isDown && <div className="text-[10px] text-orange-500 font-bold mt-1">{c.status}</div>}
               </div>
-              <div className="text-[10px] text-green-700 mt-1">LOC: {c.location} | {c.status}</div>
             </div>
-          ))}
+          )})}
         </div>
-
-        <button 
-          onClick={() => setGameState(prev => ({...prev, isPlaying: !prev.isPlaying}))}
-          className="w-full border border-green-500 py-3 hover:bg-green-500 hover:text-black transition-colors font-bold flex items-center justify-center gap-2"
-        >
-          {gameState.isPlaying ? <Pause size={16}/> : <Play size={16}/>} 
-          {gameState.isPlaying ? "PAUSE SIMULATION" : "INITIATE PROTOCOL"}
-        </button>
       </div>
 
-      {/* 右侧：剧情日志 (瀑布流) */}
-      <div className="flex-1 p-8 overflow-y-auto font-mono text-lg leading-relaxed relative bg-black" ref={scrollRef}>
-        <div className="space-y-4 pb-32">
+      {/* 右侧日志瀑布 - 更清晰的字体和颜色 */}
+      <div className="flex-1 p-8 overflow-y-auto font-mono text-lg leading-relaxed bg-slate-900 custom-scrollbar" ref={scrollRef}>
+        <div className="space-y-6 pb-32">
           {logs.map((log, i) => {
-            const isSystem = log.startsWith("SYSTEM") || log.startsWith("::");
-            const isDialogue = log.startsWith("[");
+            // 系统提示用冷蓝色
+            const isSystem = log.startsWith("::") || log.startsWith("SYS:");
+            // 叙事文本用灰白色
             const isNarrative = log.startsWith(">");
-            
+            // 对话文本（如果有的话）用浅蓝色
+            const isDialogue = log.includes("]:");
             return (
               <div key={i} className={`
-                ${isSystem ? 'text-green-300 opacity-60 text-sm' : ''}
-                ${isDialogue ? 'text-cyan-400 pl-4 border-l-2 border-cyan-800' : ''}
-                ${isNarrative ? 'text-green-100 italic' : ''}
-                transition-opacity duration-500 animate-in fade-in slide-in-from-bottom-2
+                ${isSystem ? 'text-blue-400 font-bold border-l-2 border-blue-500 pl-4 text-base' : ''}
+                ${isNarrative ? 'text-slate-300 italic' : ''}
+                ${isDialogue ? 'text-cyan-300 pl-4' : ''}
+                ${!isSystem && !isNarrative && !isDialogue ? 'text-slate-500 text-sm' : ''} // 默认灰色
+                animate-in fade-in slide-in-from-bottom-1 duration-300
               `}>
                 {log}
               </div>
             );
           })}
-          {netStatus === 'THINKING' && (
-            <div className="text-green-800 animate-pulse">&gt; Generating narrative data stream...</div>
-          )}
+          {netStatus === 'PROCESSING' && <div className="text-blue-500/70 animate-pulse text-sm">> Analyzing experiment data...</div>}
         </div>
       </div>
-
-      {/* ⚠️ 决策弹窗 (Overlay) */}
-      {gameState.isWaitingForDecision && gameState.currentDecision && (
-        <div className="absolute inset-0 bg-black/80 z-40 flex items-center justify-center p-20 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="border-2 border-red-600 bg-black max-w-2xl w-full p-8 shadow-[0_0_50px_rgba(220,38,38,0.3)]">
-            <div className="flex items-center gap-3 text-red-500 mb-4 border-b border-red-900 pb-4">
-              <ShieldAlert size={32} className="animate-pulse"/>
-              <h2 className="text-2xl font-bold tracking-tighter">CRITICAL DECISION REQUIRED</h2>
-            </div>
-            <h3 className="text-xl text-white mb-2">{gameState.currentDecision.title}</h3>
-            <p className="text-red-300 mb-8 text-lg">{gameState.currentDecision.description}</p>
-            
-            <div className="grid gap-4">
-              {gameState.currentDecision.options.map((opt: any) => (
-                <button 
-                  key={opt.id}
-                  onClick={() => handleChoice(opt)}
-                  className="text-left border border-red-800 p-4 hover:bg-red-900/50 hover:border-red-500 hover:text-white transition-all group"
-                >
-                  <span className="font-bold text-red-500 group-hover:text-white mr-3">[{opt.id}]</span>
-                  {opt.text}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
     </main>
   );
 }

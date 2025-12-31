@@ -3,75 +3,80 @@ import { AIDispatcher } from '@/utils/ai-dispatcher';
 
 export async function POST(req: Request) {
   const { gameState } = await req.json();
+  const { crew, facilityStatus, eventLog } = gameState;
+  // 只看最近的几条日志，保持上下文紧凑
+  const recentHistory = eventLog.slice(-4).join("\n"); 
 
-  // === 1. 构建记忆上下文 (Context Construction) ===
-  const { crew, shipStatus, eventLog } = gameState;
+  // === PHASE 1: 异常与反应 (并行思考) ===
+  
+  // 🔴 RED BRAIN: 系统熵增 (Anomaly Generator)
+  // 不再生成怪物，而是生成技术故障、数据溢出、能源波动
+  const redPrompt = `You are the SYSTEM ENTROPY AI of an advanced research facility.
+  Current System Entropy: ${facilityStatus.entropy}%. (Higher means worse glitches).
+  Current Power: ${facilityStatus.power}%.
+  
+  TASK: Generate technical anomalies, data fluctuations, or hardware stress based on entropy level.
+  - Low Entropy: Minor sensor ghosts, slight temperature variance.
+  - High Entropy: Power surges, containment field fluctuations, data corruption, server crashes.
+  - **Do NOT generate monsters or horror elements.** Stick to hard sci-fi tech issues.
+  
+  OUTPUT (JSON): { "event": "Technical description of the anomaly." }`;
 
-  // 提取最近的 5 条历史，防止 Token 溢出，同时保持连贯性
-  const recentHistory = eventLog.slice(-5).join("\n");
+  // 🔵 BLUE BRAIN: 科研团队 (Research Team)
+  // 角色是科学家和工程师，反应是分析、修理、感到压力
+  const bluePrompt = `You manage the RESEARCH TEAM behavior.
+  Team Status: ${JSON.stringify(crew.map((c:any) => ({n:c.name, role:c.role, focus:c.focus, stress:c.stress})))}.
+  
+  TASK: Generate team reactions to recent events.
+  - They are professionals. They analyze problems, get frustrated with glitches, or focus intently on data.
+  - High stress leads to mistakes or arguments about methodology.
+  - Incapacitated crew cannot act.
+  
+  OUTPUT (JSON): { "actions": ["Dr. Aris recalibrates sensors", "Eng. Tyrell curses at the server rack"] }`;
 
-  // 构建存活名单，辅助 AI 决策
-  const livingCrew = crew.filter((c:any) => c.status !== 'DEAD').map((c:any) => c.name).join(", ");
+  const [redRes, blueRes] = await Promise.all([
+    AIDispatcher.chatCompletion({ role: 'RED', systemPrompt: redPrompt, userPrompt: `Recent logs:\n${recentHistory}` }),
+    AIDispatcher.chatCompletion({ role: 'BLUE', systemPrompt: bluePrompt, userPrompt: `Recent logs:\n${recentHistory}` })
+  ]);
 
-  const systemPrompt = `You are the AI DIRECTOR of a sci-fi horror story called "PROTOCOL: OVERSEER".
+  if (!redRes || !blueRes) return NextResponse.json({ error: "Brain Freeze" }, { status: 429 });
+
+  // === PHASE 2: 中央调控 (Volcengine) ===
   
-  **CURRENT STATE (ABSOLUTE TRUTH):**
-  - **Living Crew:** ${livingCrew}
-  - **Ship Integrity:** ${shipStatus.hull}%
-  - **Oxygen Level:** ${shipStatus.oxygen}%
-  - **Danger Level:** ${shipStatus.danger} (0=Safe, 100=Doom)
+  // 🟢 GREEN BRAIN: 设施核心 (Facility Core)
+  // 平衡科研进展与设施安全
+  const greenPrompt = `You are the FACILITY CORE AI governing Project Genesis.
   
-  **RECENT HISTORY (MEMORY):**
-  ${recentHistory}
+  INPUTS:
+  - ANOMALY Detected (Red): ${redRes.event}
+  - TEAM Activity (Blue): ${JSON.stringify(blueRes)}
+  - FACILITY STATUS: Integrity ${facilityStatus.integrity}%, Power ${facilityStatus.power}%, Entropy ${facilityStatus.entropy}%.
   
-  **INSTRUCTIONS:**
-  1. **CONTINUITY CHECK:** You MUST respect the "Status" of crew. DEAD characters CANNOT speak or act.
-  2. **NARRATIVE:** Progress the story by 1 minute. Generate suspense, conflict, or horror.
-  3. **RANDOM EVENTS:** Randomly trigger malfunctions or alien symptoms based on Danger Level.
-  4. **DECISION NODE:** If a major crisis occurs (Fire, Alien Attack, Betrayal), STOP and ask the Player (Ship AI) for input.
+  DIRECTIVES:
+  1. **NARRATE:** Combine inputs into a detached, scientific log entry.
+  2. **PROTOCOL:** Execute automated system responses to balance research vs. safety. (e.g., "Rerouting power to containment," "Purging corrupted data buffer").
+  3. **UPDATE STATS:**
+     - Technical issues increase 'entropy' and reduce 'integrity'/'power'.
+     - Successful team actions might reduce 'entropy' or increase 'stress'.
+     - High entropy causes crew stress.
   
-  **OUTPUT FORMAT (JSON ONLY):**
+  OUTPUT (JSON):
   {
-    "thought": "Analyze history and state. Check for inconsistencies. Decide next plot point.",
-    "narrative": "Descriptive text of what happens visually/atmospherically.",
-    "dialogues": [
-      { "name": "Miller", "text": "Did you hear that?" },
-      { "name": "Isaac", "text": "It's coming from the vents!" }
-    ],
-    "stateUpdates": { // Only include changes
-      "danger": 5, 
-      "oxygen": -1,
-      "crewUpdates": [
-        { "name": "Isaac", "sanity": -10, "status": "PANICKED" } // Optional status change
-      ]
-    },
-    "decision": { // Optional: Only if player input is needed
-      "required": true,
-      "title": "VENTILATION ERROR",
-      "description": "Something is moving in the vents. Sensors detect organic mass.",
-      "options": [
-        { "id": "A", "text": "Flush vents with Plasma (Damage Ship, Kill Creature)" },
-        { "id": "B", "text": "Seal vents (Save Ship, Creature grows stronger)" }
-      ]
+    "narrative": "Log entry text.",
+    "system_action": "Optional automated response text.",
+    "stateUpdates": {
+      "integrity": -2, "power": -1, "entropy": +3,
+      "crewUpdates": [ { "name": "Dr. Aris", "stress": +5, "focus": -2 } ]
     }
-  }
-  `;
+  }`;
 
-  // 这里的 userPrompt 主要是触发器，实际内容都在 systemPrompt 的 state 里
-  const userPrompt = JSON.stringify({
-    tick: "Proceed with the next minute of the simulation.",
-    current_crew_status: crew // 再强调一次状态
+  const greenRes = await AIDispatcher.chatCompletion({ 
+    role: 'GREEN', 
+    systemPrompt: greenPrompt, 
+    userPrompt: "Execute simulation tick." 
   });
 
-  const result = await AIDispatcher.chatCompletion({
-    team: 'RED', // 使用 Red Key 作为导演
-    systemPrompt,
-    userPrompt
-  });
+  if (!greenRes) return NextResponse.json({ error: "Core Offline" }, { status: 429 });
 
-  if (result && result.error === 429) {
-    return NextResponse.json({ error: "Thinking..." }, { status: 429 });
-  }
-
-  return NextResponse.json(result || {});
+  return NextResponse.json(greenRes);
 }
